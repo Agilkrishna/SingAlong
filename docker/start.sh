@@ -3,7 +3,7 @@
 # 1. create/upgrade the SQLite schema (absolute --schema path: CWD-independent)
 # 2. start the realtime socket.io mini-service  (internal :3003)
 # 3. start the Next.js standalone server        (internal :3000)
-# 4. expose ONE public port via Caddy           (public  :$PORT)
+# 4. expose ONE public port via the bun edge proxy (public :$PORT)
 set -e
 
 : "${PORT:=10000}"
@@ -30,5 +30,5 @@ bun /app/mini-services/anthakshari-service/index.ts &
 echo "▶ [3/4] next standalone   → 127.0.0.1:3000"
 HOSTNAME=127.0.0.1 PORT=3000 NODE_ENV=production bun /app/server.js &
 
-echo "▶ [4/4] edge (caddy)      → 0.0.0.0:${PORT}"
-exec /usr/bin/caddy run --config /app/Caddyfile --adapter caddyfile
+echo "▶ [4/4] edge (bun proxy)  → 0.0.0.0:${PORT}"
+exec bun /app/edge-proxy.js

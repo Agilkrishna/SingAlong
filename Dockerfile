@@ -4,12 +4,19 @@
 # SingAlong — all-in-one image
 #   Caddy (public $PORT)  →  Next.js standalone (:3000)
 #                         →  realtime socket.io service (:3003)
-# Works on Render / Koyeb / Fly.io / Hugging Face Spaces / any Docker host.
+# Works on Render / Fly.io / Hugging Face Spaces / any Docker host.
 # ===========================================================================
 
 # ----------------------------- 1. dependencies ----------------------------
 FROM oven/bun:1.2-debian AS deps
 WORKDIR /app
+
+# openssl lets Prisma detect the distro's libssl (Debian 13 = libssl 3.x) and
+# pick the matching engine flavor. Without it Prisma silently defaults to the
+# openssl-1.1.x engine, which cannot load on this distro at query time.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./
 COPY prisma ./prisma
@@ -24,19 +31,21 @@ FROM deps AS build
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# prisma client (traced into the standalone bundle) + standalone CLI for db push
+# prisma client (traced into the standalone bundle) + a standalone CLI bundle
+# for `db push` at container boot. The CLI is pinned to the exact prisma
+# version the app resolved, so engine flavors always match.
 RUN bunx prisma generate \
  && mkdir -p /prisma-cli && cd /prisma-cli \
- && echo '{"name":"prisma-cli","private":true,"dependencies":{"prisma":"6.11.1"}}' > package.json \
+ && printf '{"name":"prisma-cli","private":true,"dependencies":{"prisma":"%s"}}\n' \
+      "$(bun -e "console.log(require('/app/node_modules/prisma/package.json').version)")" \
+      > package.json \
  && bun install
 
 RUN bun run build
 
 # ------------------------------- 3. runtime -------------------------------
 FROM oven/bun:1.2-slim AS runner
-
-# static caddy binary from the official image
-COPY --from=caddy:2 /usr/bin/caddy /usr/bin/caddy
+USER root
 
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -56,10 +65,16 @@ COPY --from=build /app/mini-services/anthakshari-service ./mini-services/anthaks
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /prisma-cli /prisma-cli
 
-# edge router + boot script
-COPY Caddyfile.prod /app/Caddyfile
+# edge router + boot script (bun-native proxy — no external binaries)
+COPY docker/edge-proxy.js /app/edge-proxy.js
 COPY docker/start.sh /app/start.sh
-RUN chmod +x /app/start.sh && mkdir -p /app/db
+
+RUN chmod +x /app/start.sh \
+ && mkdir -p /app/db \
+ && chown -R bun:bun /app/db
+
+# run unprivileged (bun, uid 1000) — SQLite dir is writable by the app
+USER bun
 
 EXPOSE 10000
 CMD ["/app/start.sh"]

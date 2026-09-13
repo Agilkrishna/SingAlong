@@ -6,11 +6,24 @@ SingAlong is **3 moving parts in 1 container**:
 |------|--------------|---------------|
 | **Next.js standalone** | UI + REST APIs (YouTube search, points, leaderboard) | 3000 |
 | **Realtime service** (Bun + socket.io) | Rooms, chat, WebRTC signaling, karaoke sync, stage points | 3003 |
-| **Caddy** | One public port → routes HTTP + WebSocket | `$PORT` |
+| **Edge proxy** (Bun, `docker/edge-proxy.js`) | One public port → routes HTTP + relays WebSocket upgrades | `$PORT` |
 
-The included `Dockerfile` runs all three, so any Docker host with **one open port** can serve the whole app. Video/audio between singers is **peer-to-peer (WebRTC)** — the server only handles signaling, so a free tiny instance is enough.
+The included `Dockerfile` runs all three, so any Docker host with **one open port** can serve the whole app. The edge proxy is pure Bun with **zero external binaries** — hardened platforms (Render) refuse to exec executables carrying file capabilities (e.g. the official Caddy image's binary), so the image only ever runs Bun, which every one of these platforms supports. Video/audio between singers is **peer-to-peer (WebRTC)** — the server only handles signaling, so a free tiny instance is enough.
 
 ---
+
+## 🆚 Free-host comparison at a glance
+
+| Host | Sleeps when idle | Wake-up delay | Branded loading page? | Credit card |
+|------|------------------|---------------|------------------------|-------------|
+| **Render** (free) | after **15 min** | ~50–60 s | **Yes — Render "waking up" splash** | No |
+| **~~Koyeb~~** ⚠️ | ~~after 1 h~~ | — | — | — |
+| **HF Spaces** (free) | after **48 h** | 1–3 min | **No** — your own app just loads | No |
+| **Cloud Run** (free tier) | scales to zero | ~10 s | No | Yes |
+| **Fly.io** / **Oracle Always Free** | never | — | — | Yes |
+
+> ⚠️ **Koyeb is no longer an option** — Mistral AI acquired it (Feb 2026) and the platform now only serves AI workloads; new web-service deploys are closed.
+> While someone is inside a room, **WebSocket traffic keeps all of these awake** — sleeping only ever hits the *first* visitor after idle time.
 
 ## ✅ Option A — Render.com (recommended, free)
 
@@ -25,17 +38,21 @@ The included `Dockerfile` runs all three, so any Docker host with **one open por
 - **Keep it always awake** with a free cron ping: create a monitor at [cron-job.org](https://cron-job.org) hitting `https://<name>.onrender.com/api` every 10 min (750 free hrs/month covers 24/7).
 - SQLite = ephemeral disk → **leaderboard resets on redeploys** (it survives ordinary restarts). See [Persistence](#-saving-the-leaderboard-permanently).
 
-## ☁️ Option B — Koyeb (free, no sleep-proxy quirks)
+## ☁️ Option B — ~~Koyeb~~ (CLOSED — acquired by Mistral AI, Feb 2026)
 
-1. Push to GitHub → [app.koyeb.com](https://app.koyeb.com) → **Create App → GitHub**.
-2. Builder **Dockerfile**, instance **Free (512 MB)**, port: **leave auto-detected** (Koyeb sets `PORT`).
-3. Deploy → `https://<app>.koyeb.app`. Koyeb scales to zero instead of sleeping; cold start similar.
+Koyeb joined Mistral AI to build AI infrastructure; the dashboard no longer offers web-service deploys to new users. **Use Option A (Render + keep-alive ping) or Option C (HF Spaces) instead.**
 
 ## 🤗 Option C — Hugging Face Spaces (free, no credit card at all)
 
 1. Create a **Space** → SDK: **Docker** → push this repo (Space secret: `YOUTUBE_API_KEY` optional).
 2. Spaces require the app on port **7860** → set Space variable `PORT=7860`.
 3. Free CPU container runs it; sleeps after ~48 h of inactivity (a cron ping also prevents this).
+
+## ☁️ Option C2 — Google Cloud Run (free tier, card required)
+
+1. `gcloud run deploy singalong --source . --allow-unauthenticated` (it builds the Dockerfile).
+2. Set port to **10000** (`--port 10000`), min-instances 0.
+3. **No splash page and ~10 s cold start**, plus 2 M requests/month free — but open **WebSockets bill vCPU-seconds continuously**, so a multi-hour room can exhaust the 180 k free vCPU-s faster than the others. Best for light/sporadic jam sessions.
 
 ## 🐳 Option D — Fly.io (not free anymore, but ~$2–3/mo, persistent disk)
 
@@ -99,8 +116,11 @@ Free tiers use an **ephemeral disk** — the `SingerScore` table (popper/heart p
 
 ```bash
 bun install && bun run build
-DATABASE_URL=file:$PWD/db/custom.db PORT=8099 caddy run --config Caddyfile.prod &
 DATABASE_URL=file:$PWD/db/custom.db PORT=3100 HOSTNAME=127.0.0.1 bun .next/standalone/server.js &
 bun mini-services/anthakshari-service/index.ts &
+PORT=8099 bun docker/edge-proxy.js &
 open http://localhost:8099
 ```
+
+Quick checks: `curl -s localhost:8099/api/leaderboard` → JSON; the room's
+top-right signal icon turns **green** (WebSocket upgrade relayed correctly).

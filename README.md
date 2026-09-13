@@ -31,7 +31,7 @@ Netflix-inspired dark UI · mobile-first · fully open source (MIT).
 | UI | Next.js 16 (App Router, standalone), React 19, Tailwind 4, shadcn/ui |
 | Realtime | Bun + socket.io mini-service (`mini-services/anthakshari-service`) — rooms, chat, WebRTC signaling, karaoke sync, stage points |
 | Data | SQLite via Prisma (singer scores) |
-| Edge | Caddy (dev gateway + prod single-port router) |
+| Edge | Bun edge proxy (`docker/edge-proxy.js`) — single-port router for prod; dev uses any reverse proxy (see `Caddyfile`) |
 
 ## 🏃 Run locally
 
@@ -45,13 +45,15 @@ bun run dev              # app on :3000
 > The client connects its socket to `/?XTransformPort=3003` on the same origin
 > — in local dev, put any reverse proxy on your app port that forwards
 > requests carrying that query param (or path `/socket.io/*`) to `:3003`.
-> The repo's `Caddyfile` and `Caddyfile.prod` show working examples.
+> The repo's `Caddyfile` shows a working example.
+> In production the bundled `docker/edge-proxy.js` (plain Bun, zero deps)
+> does this routing natively — no extra binaries needed.
 
 ## 🚀 Deploy (free)
 
-One container runs everything (Next.js + realtime service + Caddy on a single
-port). See **[DEPLOY.md](./DEPLOY.md)** — Render free tier is the recommended
-path (Blueprint included: `render.yaml`).
+One container runs everything (Next.js + realtime service + Bun edge proxy on
+a single port). See **[DEPLOY.md](./DEPLOY.md)** — Render free tier is the
+recommended path (Blueprint included: `render.yaml`).
 
 ```bash
 docker build -t singalong .
@@ -69,4 +71,3 @@ docker run -p 8080:10000 singalong   # → http://localhost:8080
 ## 📄 License
 
 MIT — see [LICENSE](./LICENSE).
-"# SingAlong" 
