@@ -1,0 +1,41 @@
+{
+        admin off
+}
+
+:{$PORT}
+
+encode zstd gzip
+
+# ---------------------------------------------------------------------------
+# Realtime socket.io service (rooms, chat, WebRTC signaling, karaoke sync).
+#
+# The client connects with  io('/?XTransformPort=3003')  → engine.io requests
+# land on  /socket.io/?...&XTransformPort=3003  (the query param is the same
+# convention the dev gateway uses). Match BOTH signals so the socket always
+# reaches the mini-service, and every other request reaches Next.js.
+# ---------------------------------------------------------------------------
+
+@realtime_path {
+        path /socket.io/*
+}
+
+handle @realtime_path {
+        reverse_proxy 127.0.0.1:3003 {
+                flush_interval -1
+        }
+}
+
+@realtime_query {
+        query XTransformPort=3003
+}
+
+handle @realtime_query {
+        reverse_proxy 127.0.0.1:3003 {
+                flush_interval -1
+        }
+}
+
+# Everything else → Next.js standalone server (internal :3000)
+handle {
+        reverse_proxy 127.0.0.1:3000
+}

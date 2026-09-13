@@ -1,0 +1,20 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy the whole stack (Next.js + realtime WebSocket + SQLite) as ONE free
+# web service. After pushing this file to GitHub:
+#   Render Dashboard → New → Blueprint → pick this repo → Apply.
+services:
+  - type: web
+    name: singalong
+    runtime: docker
+    plan: free
+    healthCheckPath: /api
+    autoDeploy: true
+    # Free-tier notes:
+    #  • sleeps after ~15 min without HTTP traffic → set up a keep-alive ping
+    #    (see DEPLOY.md). Waking takes ~50 s.
+    #  • SQLite lives on an ephemeral disk: the leaderboard resets on redeploys.
+    envVars:
+      # Optional but recommended: official YouTube Data API key (free quota).
+      # Leave empty to use the keyless scrape fallback.
+      - key: YOUTUBE_API_KEY
+        sync: false

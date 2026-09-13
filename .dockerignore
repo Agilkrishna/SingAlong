@@ -1,0 +1,32 @@
+# dependencies / builds (installed fresh inside the image)
+node_modules
+**/node_modules
+.next
+.next/*
+
+# local databases — production starts with a fresh SQLite file
+db
+*.db
+*.db-journal
+
+# sandbox / dev artifacts
+dev.log
+server.log
+download
+tests
+examples
+skills
+*.png
+*.webm
+
+# repo / CI
+.git
+.github
+.dockerignore
+Dockerfile
+render.yaml
+DEPLOY.md
+
+# secrets — the container injects its own env
+.env
+.env.*
