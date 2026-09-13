@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { upsertSinger } from '@/lib/scores'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +19,7 @@ const int = (v: unknown) => Math.max(0, Math.round(Number(v) || 0))
  * Called by the realtime service (server-to-server) in small batches.
  * Incrementally upserts lifetime applause points per anonymous singer name —
  * these power the home-page leaderboard.
+ * Backed by src/lib/scores.ts (atomic JSON file — no native dependencies).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -30,22 +31,13 @@ export async function POST(req: NextRequest) {
       const name = String(u?.name ?? '').trim().slice(0, 40)
       if (!name) continue
 
-      const points = int(u?.points)
-      const poppers = int(u?.poppers)
-      const hearts = int(u?.hearts)
-      const performances = int(u?.performances)
-      const state = String(u?.state ?? '').slice(0, 40)
-
-      await db.singerScore.upsert({
-        where: { name },
-        create: { name, points, poppers, hearts, performances, state },
-        update: {
-          points: { increment: points },
-          poppers: { increment: poppers },
-          hearts: { increment: hearts },
-          performances: { increment: performances },
-          ...(state ? { state } : {}),
-        },
+      await upsertSinger({
+        name,
+        state: String(u?.state ?? '').slice(0, 40),
+        points: int(u?.points),
+        poppers: int(u?.poppers),
+        hearts: int(u?.hearts),
+        performances: int(u?.performances),
       })
       count += 1
     }

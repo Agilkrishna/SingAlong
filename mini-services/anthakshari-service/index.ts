@@ -112,6 +112,8 @@ interface Room {
   chat: ChatMessage[]
   karaoke: Karaoke | null
   karaokeEndedAt: number
+  /** when the last singer left — empty custom rooms linger for a grace period */
+  emptyAt?: number
 }
 
 interface JoinPayload {
@@ -297,6 +299,25 @@ function flushScores() {
 
 setInterval(flushScores, POINTS_FLUSH_MS)
 
+// Sweep custom rooms that have been empty past the grace period. WhatsApp
+// invites are the reason rooms must NOT die with the creator's socket: the
+// sender closes the tab / locks the phone right after sharing, and the
+// invitee may tap the link minutes later. 30 min is plenty and keeps the
+// rooms Map tiny on the free tier.
+const EMPTY_ROOM_TTL_MS = 30 * 60 * 1000
+setInterval(() => {
+  const now = Date.now()
+  for (const [id, room] of rooms) {
+    if (
+      !room.isDefault &&
+      room.participants.size === 0 &&
+      (room.emptyAt ?? 0) + EMPTY_ROOM_TTL_MS < now
+    ) {
+      rooms.delete(id)
+    }
+  }
+}, 60_000)
+
 /* ------------------------------ socket layer ------------------------------ */
 
 io.on('connection', (socket: Socket) => {
@@ -334,8 +355,15 @@ io.on('connection', (socket: Socket) => {
     }
 
     if (room.participants.size === 0) {
-      if (!room.isDefault) rooms.delete(room.id)
-      else room.stage = null
+      if (!room.isDefault) {
+        // keep the room alive for a grace period — a WhatsApp invite must
+        // survive the creator closing the tab / locking their phone, and a
+        // page refresh must not wipe the room out from under the singer.
+        // A sweeper deletes truly abandoned rooms after EMPTY_ROOM_TTL_MS.
+        room.emptyAt = Date.now()
+      } else {
+        room.stage = null
+      }
     } else {
       broadcastRoom(room)
     }
@@ -379,6 +407,9 @@ io.on('connection', (socket: Socket) => {
         if (!alreadyHere && room.participants.size >= MAX_PARTICIPANTS) {
           return ack?.({ ok: false, error: `Room is full (max ${MAX_PARTICIPANTS} singers)` })
         }
+
+        // someone is (re)joining — cancel the empty-room grace period
+        room.emptyAt = undefined
 
         leaveCurrentRoom()
 
@@ -472,6 +503,8 @@ io.on('connection', (socket: Socket) => {
       createdAt: Date.now(),
       isDefault: false,
       participants: new Map(),
+      // born empty — the grace period starts now, before the creator joins
+      emptyAt: Date.now(),
       ...defaultRoomObjects(),
     }
     rooms.set(room.id, room)

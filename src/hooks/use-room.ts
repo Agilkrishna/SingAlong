@@ -581,11 +581,29 @@ export function useRoom() {
 
   /* ---------------------------- the Main Seat ------------------------------ */
 
-  const takeSeat = useCallback((onError?: (msg: string) => void) => {
-    socketRef.current?.emit('stage-take', (res: { ok: boolean; error?: string }) => {
-      if (res && !res.ok && res.error) onError?.(res.error)
-    })
-  }, [])
+  const takeSeat = useCallback(
+    async (handlers?: { onError?: (msg: string) => void; onSuccess?: () => void }) => {
+      // The Main Seat is the singing seat. A listener (or anyone without media
+      // yet) gets ONE combined mic+camera prompt right on this tap — sitting
+      // down silently would look broken, so a hard block beats a muted seat.
+      if (!localStreamRef.current) {
+        const got = await acquireLocalMedia(true)
+        const stream = localStreamRef.current
+        if (!got || !stream) {
+          handlers?.onError?.(
+            'Mic & camera are needed to sing from the Main Seat — allow them in your browser and try again.',
+          )
+          return
+        }
+        publishStreamToPeers(stream)
+      }
+      socketRef.current?.emit('stage-take', (res: { ok: boolean; error?: string }) => {
+        if (res && !res.ok && res.error) handlers?.onError?.(res.error)
+        else if (res?.ok) handlers?.onSuccess?.()
+      })
+    },
+    [acquireLocalMedia, publishStreamToPeers],
+  )
 
   const leaveSeat = useCallback(() => {
     socketRef.current?.emit('stage-leave')

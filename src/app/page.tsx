@@ -10,8 +10,10 @@ import {
   generateAnonymousProfile,
   hasStoredProfile,
   detectStateFromCoords,
+  stateByName,
   AnonymousProfile,
 } from '@/lib/indian-states'
+import { stateFromSlug } from '@/lib/invite'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { LandingView } from '@/components/anthakshari/landing-view'
 import { LobbyView } from '@/components/anthakshari/lobby-view'
@@ -97,6 +99,28 @@ export default function Home() {
       prev ?? { roomId, name: knownName || `Room code ${roomId}` },
     )
   }, [])
+
+  // WhatsApp invite deep link — /?room=<roomId>&s=<State> drops the invitee
+  // straight into the join dialog for that room. Consumed once, then stripped
+  // from the address bar so a refresh doesn't re-open the invite.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const roomId = params.get('room')?.trim().slice(0, 64)
+    if (!roomId) return
+    const s = params.get('s')
+    const stateName =
+      (s && stateByName(s)?.name) ||
+      (roomId.startsWith('state:') ? stateFromSlug(roomId.slice(6)) : null) ||
+      'Delhi'
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setState(stateName)
+    setView('lobby')
+    requestJoin(
+      roomId,
+      roomId.startsWith('state:') ? `${stateName} Singers` : undefined,
+    )
+    window.history.replaceState(null, '', window.location.pathname)
+  }, [requestJoin])
 
   // step 2 — actually connect with the chosen media mode
   const confirmJoin = useCallback(
@@ -205,7 +229,7 @@ export default function Home() {
   )
 
   const handleTakeSeat = useCallback(
-    () => roomApi.takeSeat(seatError),
+    (onSuccess?: () => void) => roomApi.takeSeat({ onError: seatError, onSuccess }),
     [roomApi, seatError],
   )
 
@@ -282,7 +306,9 @@ export default function Home() {
         />
       )}
 
-      {/* pre-join choice — singer (camera + mic) or listener (no permissions).
+      {/* pre-join choice — the PRIMARY action joins with mic & camera, so the
+          browser permission prompt fires right as you join. Listeners who
+          explicitly don't want the prompt use the quiet option below.
           The built-in ✕ (and overlay click) cancels and stays in the lobby. */}
       <Dialog open={!!pendingJoin} onOpenChange={(open) => !open && setPendingJoin(null)}>
         <DialogContent
@@ -293,7 +319,7 @@ export default function Home() {
             <DialogTitle className="text-lg font-black text-white">Join this stage?</DialogTitle>
             <DialogDescription className="text-xs text-neutral-400" data-testid="join-dialog-room">
               {pendingJoin?.name}
-              {state ? ` · ${state}` : ''} — choose how you want to join
+              {state ? ` · ${state}` : ''} — we&apos;ll ask for mic &amp; camera as you join
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2.5">
@@ -309,29 +335,29 @@ export default function Home() {
                 ) : (
                   <Mic className="h-4 w-4 text-[#E50914]" />
                 )}
-                Join as singer
+                Join room
               </span>
               <span className="mt-1 block text-xs leading-relaxed text-neutral-400">
-                Camera + mic on — grab the Main Seat and sing.
+                Your browser will ask for <b className="text-neutral-200">audio &amp; video</b>{' '}
+                permission — allow it once and you&apos;re ready for the Main Seat.
               </span>
             </button>
             <button
               onClick={() => confirmJoin(false)}
               disabled={joining}
               data-testid="join-listener"
-              className="rounded-xl border border-neutral-700 bg-neutral-900 p-4 text-left transition hover:border-neutral-500 disabled:opacity-50"
+              className="rounded-lg border border-neutral-800 bg-transparent px-3 py-2.5 text-left transition hover:border-neutral-600 disabled:opacity-50"
             >
-              <span className="flex items-center gap-2 text-sm font-black text-white">
+              <span className="flex items-center gap-2 text-xs font-black text-neutral-300">
                 {joining ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-neutral-300" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-neutral-400" />
                 ) : (
-                  <Headphones className="h-4 w-4 text-neutral-300" />
+                  <Headphones className="h-3.5 w-3.5 text-neutral-400" />
                 )}
-                Join as listener
+                Join without mic &amp; camera
               </span>
-              <span className="mt-1 block text-xs leading-relaxed text-neutral-400">
-                No camera or mic asked — watch, chat &amp; applaud. Become a singer later with the
-                mic button.
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-neutral-500">
+                Listener mode — watch, chat &amp; applaud. No permission prompt.
               </span>
             </button>
           </div>

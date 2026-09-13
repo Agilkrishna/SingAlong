@@ -1,0 +1,252 @@
+     1→# Worklog
+     2→
+     3→---
+     4→Task ID: 1
+     5→Agent: Super Z (main agent)
+     6→Task: Complete Antakshari app — remove minimum-members restriction + add YouTube karaoke search & playback
+     7→
+     8→Work Log:
+     9→- Reviewed existing app state (src/components/anthakshari/*, src/hooks/use-room.ts, mini-services/anthakshari-service/index.ts) — app foundation existed from prior session
+    10→- Removed MIN_PLAYERS_TO_START=2 restriction in realtime service: game-start now allowed with 1 player; beginTurn/advanceTurn only end game when 0 players remain (solo practice supported)
+    11→- Removed "Need 2+ singers" gate in game-panel.tsx → button now reads "Start Solo Practice" with explainer copy
+    12→- Added karaoke engine to socket service: room.karaoke state {videoId, title, playing, positionAt, updatedAt, by, byName, queue} + events karaoke-load / karaoke-play / karaoke-pause / karaoke-seek / karaoke-ended (de-duped 2s) / karaoke-queue-add / karaoke-queue-remove; karaoke included in roomSnapshot for late joiners
+    13→- Extended use-room.ts: KaraokeState/QueueItem types, karaoke-state listener, 7 karaoke actions
+    14→- Created /api/youtube/search route: server-side YouTube results scrape (no API key, open-source friendly), ytInitialData parse, videos-only filter, returns top 20 with videoId/title/channel/duration/thumbnail
+    15→- Created /karaoke-search page: the separate search iframe — dark UI, results list, "Play on stage" + "Queue" buttons communicate via postMessage
+    16→- Created KaraokePanel component: YouTube IFrame API player (kept mounted across tab switches so playback continues), room-wide sync with drift correction (serverNow clock offset, 2.5s resync threshold), echo-guard (applyingUntilRef), autoplay-block "Tap to join playback" overlay, local media mute/unmute + volume slider, queue list with play-now/remove
+    17→- Integrated into room-view/room-controls: 3-way side panel (game/chat/karaoke), YouTube toggle button, mini now-playing bar (fixed above controls) with broadcast play/pause + OPEN, unread-chat badge repositioning
+    18→- Fixed lint issues: </button>→</Button> typo, ref-during-render → useEffect assignment, synchronous setState in effect → render-adjust pattern + derived error state
+    19→- Verified: tsc clean (app code), eslint clean, /api/youtube/search returns real karaoke tracks, full browser E2E via Caddy proxy (port 81): landing→Maharashtra→solo join (1/8)→solo game start→"Iktara" accepted→chain advances to letter A→karaoke panel→search iframe→"PLAY ON STAGE"→LIVE state→media mute→mini player→chat system messages
+    20→
+    21→Stage Summary:
+    22→- App complete with both requested changes: no minimum-members restriction (solo play works end-to-end) and YouTube karaoke with separate search iframe playable within the room
+    23→- Realtime service auto-reloaded via bun --hot; Next dev server on :3000; preview must go through Caddy :81 (XTransformPort=3003 socket routing)
+    24→- Screenshots: download/verify-6-karaoke-room.png, verify-7-karaoke-panel.png
+    25→- Note: YouTube embed shows a bot-check dialog when accessed from datacenter IPs in headless tests; normal user devices play embeds fine
+    26→
+    27→---
+    28→Task ID: 2
+    29→Agent: Super Z (main agent)
+    30→Task: Remove Rounds competition feature → Main Seat jam model + popper/heart applause points + home leaderboard + persistent unique anonymous names
+    31→
+    32→Work Log:
+    33→- Prisma: dropped MatchResult/SungSong (rounds era), added SingerScore {name unique, points, poppers, hearts, performances, state}; db push OK
+    34→- Realtime service rewrite (mini-services/anthakshari-service/index.ts): removed entire rounds game engine (turns/letters/timers/scores/game-*/MIN_PLAYERS); added Stage {singerId, singerName, singerColor, since, points, poppers, hearts} + events stage-take / stage-leave / stage-award (popper=+10, heart=+100, 600ms cooldown, singer cannot self-award); room.stage in snapshot; publicRoom.live badge; stage auto-clears when singer leaves/disconnects
+    35→- Identity: join payload gains persistent pid (crypto.randomUUID in localStorage profile); same-pid rejoin replaces stale socket & seat/host follows; duplicate names inside a room rejected case-insensitively (error: name already taken); pid stripped from roomSnapshot broadcasts (privacy)
+    36→- Points persistence: in-service pending queue flushed every 3s → POST /api/points (batched upsert-increment, re-queued on failure)
+    37→- API: new POST /api/points; GET /api/leaderboard rewritten (top 20 singers, global or ?state=)
+    38→- Client: AnonymousProfile gains pid + hasStoredProfile(); use-room.ts — StageState/ApplauseEvent types, takeSeat/leaveSeat/award/clearApplause, applause event buffer, game state removed
+    39→- UI: game-panel.tsx deleted; new stage-panel.tsx (empty-seat CTA, seat-mine stats + step down, seat-other popper/heart award cards + QuickAwardButtons overlay); new applause-bursts.tsx (keyframes in globals.css — popper showers "10 10 10", big +100 heart); room-view/room-controls rewired (stage panel, header "🎤 on the Main Seat", video-tile onStage badge); landing-view — leaderboard section + welcome-back autofill note + updated copy; lobby-view — live badges + per-state Top Singers; page.tsx wiring with toast error surfacing
+    40→- Fixed real bug found in E2E: KaraokePanel unmount crash (React 19 nulls refs before effect cleanup) — wrapperRef.current!.innerHTML → captured wrapper closure
+    41→- Verified via 2 isolated browser sessions: seat take, popper burst + stats 10→110, cross-client sync, name-theft rejection toast, seat auto-free on leave, leaderboard persistence (state + global), leave-without-crash, solo room OK (no minimum members), welcome-back chip; tsc + eslint clean; service & Next restarted cleanly; test rows purged from DB
+    42→
+    43→Stage Summary:
+    44→- Room is now a simple jam stage (no rounds/competition): Main Seat first-come-first-served, audience applause = popper 🎉 +10 / heart ❤️ +100 with room-wide animated bursts
+    45→- Points persist per anonymous name → home-page India leaderboard + per-state Top Singers in lobby
+    46→- Anonymous names: auto-populated on return visits from localStorage, protected by pid rejoin matching, and unique inside a room
+    47→- Screenshots: download/e2e-1..6-*.png; realtime service on :3003 (bun --hot), Next on :3000, preview via Caddy :81
+    48→
+    49→---
+    50→Task ID: 3
+    51→Agent: Super Z (main agent)
+    52→Task: Add shrink/expand controls for the right-side panel (YouTube search + player UI)
+    53→
+    54→Work Log:
+    55→- room-view.tsx: added panelSize state (compact / normal / wide) driving the aside width — compact max-w-[19rem], normal max-w-sm, wide max-w-full sm:max-w-[40rem]; aside switched transition-transform → transition-all so width animates smoothly with the slide
+    56→- Added an edge-mounted handle (ChevronsLeft expand / ChevronsRight shrink, vertically centered on the panel's left border, outside its box, z-30, rounded pill w/ backdrop-blur); buttons disable at bounds; data-testid panel-resize-handle / panel-expand / panel-shrink + data-panel-size attr on aside; handle renders only while a panel is open
+    57→- Fixed real bug caught in E2E: initial growPanel only handled normal→wide, making expand a no-op from compact (asymmetric with shrink) — now steps one size per click both directions
+    58→- Browser E2E (agent-browser via Caddy :81): landed→Goa→join→measured 384px normal →640px wide (expand disabled) → opened karaoke panel + search iframe in wide → shrink×2 →304px compact (shrink disabled, iframe stayed open) → searched "tere bin karaoke" inside compact iframe → real results → PLAY ON STAGE → expand×2 →640px wide with LIVE badge intact; full cycle verified; no page errors; screenshots download/resize-1..4-*.png
+    59→- Note: the "Tere Bin" embed showed YouTube's owner-restricted overlay from the datacenter IP — our per-track error banner surfaced it correctly (expected behavior, not an app bug)
+    60→
+    61→Stage Summary:
+    62→- Side panel (karaoke/stage/chat) now shrinkable & expandable via an edge handle: compact 19rem ↔ normal 24rem ↔ wide 40rem (full-width on phones), animated, bounds-disabled, playback/search unaffected across resizes
+    63→- tsc + eslint clean; dev servers untouched (Next :3000, realtime :3003, preview :81)
+    64→
+    65→---
+    66→Task ID: 4
+    67→Agent: Super Z (main agent)
+    68→Task: Prepare free hosting/deployment (Docker single-container + Render blueprint) and fix bugs found during prod validation
+    69→
+    70→Work Log:
+    71→- Analyzed deploy constraints: Next standalone + Bun socket.io service (path '/', client io('/?XTransformPort=3003')) + SQLite/Prisma + one public port requirement
+    72→- New files: Dockerfile (multi-stage oven/bun: caddy binary copied from official image, standalone Next + realtime service + prisma CLI bundle), docker/start.sh (db push → service :3003 → next :3000 → caddy :$PORT), Caddyfile.prod (routes /socket.io/* OR query XTransformPort=3003 → :3003 with flush_interval -1, rest → :3000), .dockerignore, render.yaml (free docker web service, health /api), DEPLOY.md (Render/Koyeb/HF Spaces/Fly/Oracle guides, keep-alive cron, SQLite persistence options, YouTube API key mode, TURN notes, security checklist)
+    73→- use-room.ts: added optional TURN relay via NEXT_PUBLIC_TURN_URL/USERNAME/CREDENTIAL (build-time, default off)
+    74→- /api/youtube/search: added official Data API v3 mode when YOUTUBE_API_KEY set (datacenter IPs get bot-checked by scrape), keyless scrape kept as fallback
+    75→- Prod-simulation E2E (standalone :3100 + prod Caddy :8099 + live :3003) caught 2 REAL bugs:
+    76→  1. Caddyfile.prod had {$PORT} without colon → Caddy bound HTTPS:443 (permission denied). Fixed to :{$PORT}
+    77→  2. PRE-EXISTING chat bug: user messages never displayed — client had NO socket 'chat' listener (only room-state snapshots refreshed chat; several service emitters send chat-only). Fixed in use-room.ts with dedup-by-id incremental 'chat' listener
+    78→- Verified post-fix: full E2E through single prod port (landing→Delhi→join→socket green→2 users cross-origin same room→chat bidirectional dev↔prod tabs→YouTube search API→leaderboard→stage badge); tsc+eslint clean; production build clean; prod-sim processes killed; dev stack intact
+    79→
+    80→Stage Summary:
+    81→- Repo is deploy-ready: push to GitHub → Render Blueprint (free) or any Docker host; DEPLOY.md has step-by-step for 5 platforms + operational caveats
+    82→- Chat now actually works for users (bug existed since the rounds-removal rewrite; system msgs masked it in earlier E2E)
+    83→
+    84→---
+    85→Task ID: 5
+    86→Agent: Super Z (main agent)
+    87→Task: Package GitHub-ready zip for user deployment
+    88→
+    89→Work Log:
+    90→- Created open-source essentials: README.md (features/stack/local dev/deploy/env table), LICENSE (MIT), .env.example (DATABASE_URL + optional YOUTUBE_API_KEY / TURN vars)
+    91→- Staged deploy bundle with rsync excludes (node_modules, .next, db/*.db, .env, dev/server logs, download/examples/skills/tests/.git/.zscripts/worklog.md); removed stray upload/ + tsbuildinfo + service logs; added db/.gitkeep
+    92→- Verified zip: 104 files, flat root structure (Dockerfile/render.yaml/package.json at top level), zero leaked secrets/artifacts
+    93→- Bundle: download/singalong-github.zip (~0.7 MB)
+    94→
+    95→Stage Summary:
+    96→- User can push the zip contents to GitHub and deploy via Render Blueprint without any further changes
+    97→
+    98→---
+    99→Task ID: 6
+   100→Agent: Super Z (main agent)
+   101→Task: Answer user question about Render free-tier branded loader + free alternatives; update DEPLOY.md comparison
+   102→
+   103→Work Log:
+   104→- Web-verified current free-tier behaviors: Render free sleeps after 15 min idle (HTTP or WebSocket traffic counts) and shows a Render-branded "waking up" splash for ~50-60s on next visit; Koyeb free scales to zero after 1 h with ~5-15s cold start and NO splash; HF Spaces free sleeps after 48 h (1-3 min Docker cold start, no splash); Cloud Run free tier = 2M req/mo, 180k vCPU-s (WebSockets burn vCPU-seconds while open), ~10s cold start, card required
+   105→- DEPLOY.md: added "Free-host comparison at a glance" table (sleep threshold / wake delay / branded page / card) with note that in-room WebSocket traffic keeps all hosts awake; expanded Option B (Koyeb) with why-choose-it facts; inserted Option C2 (Cloud Run) guide
+   106→- No app code changes; verified no edit residue in DEPLOY.md
+   107→
+   108→Stage Summary:
+   109→- User's suspicion confirmed (Render free shows branded splash after 15-min sleep); recommended path: keep Render + cron-job.org ping every 10 min (splash practically never appears) OR redeploy same repo to Koyeb (1h sleep, seconds cold start, no splash) — repo is deploy-ready for either with zero code changes
+   110→
+   111→---
+   112→Task ID: 7
+   113→Agent: Super Z (main agent)
+   114→Task: Koyeb deploy walkthrough -> discovered Koyeb closed to new web-service deploys (Mistral acquisition); pivot guidance + DEPLOY.md correction
+   115→
+   116→Work Log:
+   117→- User screenshot showed app.koyeb.com dashboard with only "Koyeb is joining Mistral!" banner, no Create button
+   118→- Web-verified: Mistral AI acquired Koyeb (Feb 17 2026, Reuters/SiliconAngle/Koyeb blog); platform pivots to AI infra; new web-service deployments closed
+   119→- DEPLOY.md corrected: comparison table Koyeb row struck out, warning note added, Option B marked CLOSED with pointer to Option A (Render + cron ping) / Option C (HF Spaces)
+   120→- No app code changes
+   121→
+   122→Stage Summary:
+   123→- Koyeb path is dead for new users; recommended alternatives: Render free + cron-job.org ping every 10 min (splash avoided) or HF Spaces free (48h sleep, no splash, no card)
+   124→
+   125→---
+   126→Task ID: 8
+   127→Agent: Super Z (main agent)
+   128→Task: Fix Render deploy failure (edge router EPERM + prisma schema not found) and produce final GitHub zip
+   129→
+   130→Work Log:
+   131→- Diagnosed from user's Render build log; verified root causes against upstream sources:
+   132→  1. "exec caddy: Operation not permitted" (exit 126): official caddy:2 image setcaps the binary (confirmed `setcap cap_net_bind_service=+ep` in caddy-docker Dockerfile.tmpl); Render execs with no-new-privileges -> EPERM. Fix: COPY to /tmp then plain `cp` (drops security.capability xattr) + chmod 0755 + build-time `caddy version` self-check
+   133→  2. prisma "Could not find Prisma Schema": start.sh did `cd /prisma-cli` before db push -> schema searched under /prisma-cli. Fix: absolute `--schema /app/prisma/schema.prisma`, CWD-independent (verified by running db push from /tmp)
+   134→  3. Latent: Prisma "Defaulting to openssl-1.1.x" on Debian 13 (libssl3) -> engine would fail at query time. Fix: apt-get install openssl in deps/build AND runner stages
+   135→  4. Latent perms: runner inherits non-root USER bun; /app/db was root-owned -> SQLite create would EACCES. Fix: USER root during build RUNs, chown /app/db + /tmp/caddy-{data,config} to bun, USER bun at runtime, edge-router XDG dirs -> /tmp
+   136→  5. /prisma-cli version now dynamically pinned to the app's resolved prisma version (was hardcoded 6.11.1 vs app 6.19.2)
+   137→- Validated locally (no docker in sandbox): sh -n start.sh; real prisma db push with absolute --schema from foreign CWD (in sync); caddy validate Caddyfile.prod -> Valid configuration
+   138→- scripts/make-github-zip.sh: rebuilt download/singalong-github.zip (123 files, 233 KB) with rsync include .env.example fix, download/ exclude restored; verified 14 key files present (unzip -Z1 exact match), zero leaks (no .env/node_modules/.next/db/logs), fixed Dockerfile+start.sh+DEPLOY.md confirmed inside
+   139→
+   140→Stage Summary:
+   141→- Render failure root causes all fixed in Dockerfile + docker/start.sh; user action: re-push these files (or whole zip) to GitHub -> Render auto-redeploys; expect "database schema ready" + edge router on 0.0.0.0:$PORT this time
+   142→
+   143→---
+   144→Task ID: 9
+   145→Agent: Super Z (main agent)
+   146→Task: Render still blocked the edge binary even after cap-stripping -> replaced it with a pure-Bun edge proxy, E2E verified, rebuilt zip
+   147→
+   148→Work Log:
+   149→- User's 2nd Render deploy: prisma fix WORKED (schema ready, DB synced) but the copied binary still exec-failed with EPERM/126 despite the cp cap-strip
+   150→- Root-cause probing: local experiment proved Bun fires node:http 'upgrade' events but raw socket writes on upgraded connections never reach the client -> raw TCP passthrough impossible under Bun; and Render's runtime evidently blocks the external binary regardless of attributes. Decision: eliminate external binaries entirely
+   151→- Wrote docker/edge-proxy.js (Bun-native, zero deps): Bun.serve fetch() proxies HTTP (fetch passthrough, accept-encoding identity) and srv.upgrade() accepts WS upgrades, relaying message-by-message to a dedicated upstream WebSocket per client (backlog buffer until upstream open, close/error propagation, idleTimeout 0)
+   152→- Dockerfile: removed binary-copy + XDG storage entirely; runner now copies only edge-proxy.js; openssl in deps/build stage kept (generate-time engine flavor); runner openssl apt-get dropped (proved unnecessary - db push succeeded on Render even with detection warning)
+   153→- start.sh step 4: exec bun /app/edge-proxy.js
+   154→- Local E2E through proxy :8099 -> standalone :3100 + realtime :3003: HTTP matrix (/, /api, /api/leaderboard, socket.io polling handshake via path rule, query-rule probe identical to direct :3003) ALL PASS; WS upgrade via curl -> HTTP/1.1 101 + engine.io open packet 0{sid...} relayed back; full browser E2E via agent-browser: landing renders, Delhi join, GREEN socket indicator, chat message delivered + displayed through proxy
+   155→- Docs: DEPLOY.md architecture table + smoke test now reference the Bun proxy (incl. green-dot quick check); README stack table + notes updated
+   156→- scripts/make-github-zip.sh rebuilt download/singalong-github.zip: 124 files 235 KB; verified docker/edge-proxy.js + new Dockerfile (edge-proxy present, zero old-binary refs) + fixed start.sh inside; leak scan clean
+   157→
+   158→Stage Summary:
+   159→- Container now execs ONLY Bun (the one runtime Render demonstrably runs) - the entire foreign-binary EPERM failure class is eliminated by construction
+   160→- User action: update Dockerfile + docker/start.sh, ADD docker/edge-proxy.js (or re-upload zip) -> auto-redeploy
+   161→
+   162→---
+   163→Task ID: 10
+   164→Agent: Super Z (main agent)
+   165→Task: Fix Render build failure "Processing image failed ... The PNG is not in RGBA format!" on src/app/favicon.ico; repackage zip
+   166→
+   167→Work Log:
+   168→- Root cause: scripts/make-favicon.py drew the red mic icon on an 'RGB' gradient canvas and saved it straight to .ico -> the PNG entries embedded in favicon.ico were color-type 2 (RGB); Next.js 16/Turbopack's Rust image decoder rejects non-RGBA PNGs inside .ico at build time
+   169→- Fix: convert master to RGBA (alpha=255, visually identical) before resize/save; apple-icon.png also emitted as RGBA (it is build-processed too)
+   170→- Added scripts/verify-favicon.py: parses ICO directory, asserts every embedded PNG is colortype 6 (RGBA) / BMP entries 32bpp, PIL round-trips all frames as RGBA, apple-icon.png is PNG+RGBA -> ALL CHECKS PASSED (16/32/48 entries, colortype=6)
+   171→- Definitive validation: ran real `next build` (Next 16.1.3 Turbopack) locally -> compiled successfully, icon routes emitted (this exact step failed on Render before)
+   172→- Confirmed the two functional features from the prior session are in the tree before packaging: room-wide karaoke audio sync (karaoke-panel.tsx "Play karaoke for everyone"/controller sync) and panel close (X) handle in room-view.tsx ("Close panel — back to the stage")
+   173→- scripts/make-github-zip.sh: fixed stale verification (caddy-with-caps -> edge-proxy markers), added favicon assets to key-file list, and replaced the flaky `unzip -Z1 | grep -q` pipeline (SIGPIPE race -> false MISSING on late-listed entries) with a single captured ZLIST grep
+   174→- Rebuilt download/singalong-github.zip: 129 files, 251 KB; 17/17 key files present incl. favicon.ico/icon.svg/apple-icon.png; leak scan clean
+   175→- Preview asset: download/favicon-preview.png (256px of the red-gradient mic design)
+   176→
+   177→Stage Summary:
+   178→- Render build error eliminated by construction: all raster icons are RGBA (verified by parser + real Turbopack build); zip rebuilt with the three user requests (lobby-wide YouTube audio, join/host UX with close button, red favicon)
+   179→- User action: re-upload/replace repo contents (or the whole zip) on GitHub -> Render auto-redeploys
+   180→
+   181→---
+   182→Task ID: 11
+   183→Agent: Super Z (main agent)
+   184→Task: Fix React "Encountered two children with the same key" console error in chat (duplicate chat message ids) and the visible doubled "joined the stage" lines; repackage zip
+   185→
+   186→Work Log:
+   187→- Root cause found in mini-services/anthakshari-service/index.ts join handler: `const m = sysMsg(...)` (sysMsg already pushes to room.chat) followed by a second `room.chat.push(m)` -> EVERY join wrote the same message object twice into room.chat; snapshots then delivered both copies to all clients -> duplicate React key (e.g. `kcty86men`, a 9-char base36 msgId) AND the same "X joined the stage" line rendered twice
+   188→- Audited every room.chat write site: join (double-push BUG), user chat (single push, ok), all other sysMsg callers (single push, ok) - join was the only offender
+   189→- Server fixes: (1) removed the duplicate push; (2) msgId() now crypto randomUUID (node:crypto) instead of Math.random base36 -> collision-proof ids (also covers applause ids used as keys); (3) new pushChat() choke-point with id-uniqueness guard + history trim, used by sysMsg and the user-chat handler so room.chat can never hold duplicate ids
+   190→- Client hardening (src/hooks/use-room.ts): added CHAT_HISTORY const + dedupeChat() (keeps first occurrence, drops malformed ids, caps 60) applied to every room-state snapshot; incremental 'chat' listener keeps its id-dedupe; both paths now React-key-safe even against a stale/mid-deploy service
+   191→- E2E scripts/test-chat-dedup.ts (bun socket.io-client, 2 clients, real service): create room -> A joins -> B joins -> B chats -> A same-socket rejoins; asserts no duplicate ids, UUID-shaped ids, correct join/leave message counts, user chat delivery. First run against the stale service reproduced the bug live (dup id w40rq06kl); after restart ALL 17 CHECKS PASSED
+   192→- Ops notes: `bun --hot` watcher did not pick up edits in this sandbox and the old service survived `kill`; force-killed all instances; sandbox reaps background processes started in a tool call between calls -> final validation ran server+E2E inside one call; dev service restarted detached (bun --hot, logs/realtime.log) for preview
+   193→- Validation: tsc clean on app code, eslint clean, next build (16.1.3 Turbopack) clean; scripts/make-github-zip.sh rebuilt download/singalong-github.zip (129 files, 254 KB), 17/17 key files, leak scan clean
+   194→
+   195→Stage Summary:
+   196→- Duplicate-key console error and doubled join messages share one root cause (server-side double push) - fixed at the source, made structurally impossible server-side (pushChat guard + UUID ids) and defensively client-side (snapshot dedupe); verified by live 2-client E2E
+   197→- User action: replace repo contents with the updated zip (changed files: mini-services/anthakshari-service/index.ts, src/hooks/use-room.ts) -> Render auto-redeploys
+   198→
+   199→---
+   200→Task ID: 12
+   201→Agent: Super Z (main agent)
+   202→Task: (a) Chat input unreachable beneath the floating YouTube now-playing bar; (b) add a confirmation pop-up when leaving the room
+   203→
+   204→Work Log:
+   205→- Diagnosed (a): the mini now-playing bar (fixed bottom-[76px] z-30, ~50px tall -> spans ~76-124px from viewport bottom) floats ABOVE the side panel (z-20, ends at the controls top ~64px) -> its bottom ~60px covers exactly the ChatPanel input row on phones (panel is w-full) and under desktop wide panels too
+   206→- Fix (a) room-view.tsx: aside gains conditional `pb-[70px]` whenever the mini player is visible and a panel is open -> ChatPanel (messages + input row) and StagePanel bottom content now sit above the bar; karaoke panel unaffected (bar hidden while it is open)
+   207→- Fix (b): leave button no longer leaves directly - RoomControls onLeave now opens a Radix AlertDialog ("Leave the room? ... Main Seat will free up ... points already saved") with Stay (cancel) / "Yes, leave" (destructive red, calls onLeave); dark Netflix styling via explicit classes; data-testids: leave-room, leave-confirm, leave-cancel, leave-confirm-action
+   208→- Mobile-viewport browser E2E (agent-browser, 390x844, via Caddy :81): Goa -> join as listener -> DJ Bot script (scripts/karaoke-load-e2e.ts) emits karaoke-load jfKfPfyJRdk into state:goa -> mini bar appears -> open chat: input bottom 689px vs bar top 718px = 29px clearance, overlap=false -> typed & sent a chat message mid-playback (rendered) -> Leave -> dialog -> Stay -> STILL IN ROOM -> Leave -> Yes, leave -> BACK AT LOBBY; zero page errors; screenshots download/fix-chat-above-player.png, fix-leave-confirm.png, fix-after-leave.png
+   209→- Validation: tsc + eslint clean (app code), next build (Turbopack) clean; zip rebuilt (129 files, 255 KB), leak scan clean
+   210→
+   211→Stage Summary:
+   212→- Chat is now fully usable while a YouTube track plays in the background (input sits above the floating player on every panel size), and leaving a room requires an explicit confirmation
+   213→- User action: replace repo contents with the updated zip (changed: room-view.tsx, room-controls.tsx) -> Render auto-redeploys
+   214→
+   215→---
+   216→Task ID: 13
+   217→Agent: Super Z (main agent)
+   218→Task: Fix "India's Top Singers" dashboard stuck on "Loading…" forever; make leaderboard/points persistence production-proof; repackage zip
+   219→
+   220→Work Log:
+   221→- Root cause chain: applause → realtime service batches → POST /api/points → Prisma (native SQLite engine) → /api/leaderboard reads it. Locally (dev + standalone) this worked, but on the Render container the Prisma native query engine / boot-time `db push` is a silent single point of failure; the client then had `catch {}` + a `data?.ok` guard with NO error state → `board === null` forever → eternal "Loading the board…" spinner (landing "India's top singers" + lobby "Top Singers · {state}")
+   222→- Persistence swapped to a zero-native-dependency store: new src/lib/scores.ts — in-process globalThis singleton + atomic JSON file writes (tmp+rename), serialized via a promise chain, well-formed-entry validation on load, 5000-singer cap with prune; /api/leaderboard + /api/points rewritten onto listSingers()/upsertSinger() with IDENTICAL response shapes (realtime service contract untouched); src/lib/db.ts deleted (no @prisma/client imports remain)
+   223→- Client hardening: new src/hooks/use-leaderboard.ts — 8 s AbortController timeout per attempt, 2 automatic backoff retries (1.5 s / 4 s), explicit loading/ready/error status, stale-while-revalidate (manual refresh keeps old list), state-switch reset; landing-view.tsx + lobby-view.tsx rewired: full-error state with Retry button (data-testid leaderboard-error) AND a red error strip above still-visible stale rows (data-testid kept: leaderboard-empty, leaderboard-refresh) — infinite spinner is now structurally impossible
+   224→- Docker/start slimmed: Dockerfile drops apt-get openssl, `COPY prisma`, `bunx prisma generate`, the /prisma-cli bundle, COPY of prisma/ and DATABASE_URL ENV; start.sh renumbered [1/3], drops the whole `prisma db push` boot step (one less thing that can fail on boot); SCORES_FILE pinned to /app/db/scores.json (dir already created+chowned)
+   225→- Sandbox lessons this round: (1) stale `bun server.js` survived pkill -f "standalone/server.js" because its cmdline was bare "bun server.js" — kill both patterns; (2) E2E assert helper had argv order bug (parsed the expression as JSON → all asserts failed spuriously); (3) bun chdirs to the script dir for relative entrypoints → cwd-based store path landed in .next/standalone/db/ — fixed by pinning SCORES_FILE absolutely (container + tests)
+   226→- Validation: scripts/test-scores-store.sh (real standalone prod server, NO DATABASE_URL): 12/12 PASSED — empty boot, points flush, state filter+sort, All-India ordering, increments, persistence across full server restart, scores.json on disk; tsc + eslint clean; next build clean (one transient Google Fonts fetch fail, retry OK); browser E2E via agent-browser: landing 4 rows (leader-row testids), Goa lobby 1 row, network-route abort → stale rows kept + "Couldn't refresh — showing the last board. Retry" strip shown (screenshot download/fix-leaderboard-error.png), unroute → Retry → rows restored (fix-leaderboard-home.png); zero page errors
+   227→- Repackaged: download/singalong-github.zip 133 files 260 KB; 17/17 key files, scores.ts+use-leaderboard.ts in, db.ts out, Dockerfile/start.sh prisma-free (only the explanatory NOTE), leak scan clean
+   228→
+   229→Stage Summary:
+   230→- Top Singers board can no longer hang: the API layer has no native dependencies left to fail on Render, and the UI has timeout+retry+visible error states everywhere
+   231→- Data note: Render free-tier disk is ephemeral, so scores reset on each redeploy/restart exactly as SQLite did before — a persistent disk mount on /app/db would make them survive (optional, not required)
+   232→- User action: replace repo contents with the updated zip (changed: src/lib/scores.ts [new], src/hooks/use-leaderboard.ts [new], src/lib/db.ts [delete], api/leaderboard + api/points routes, landing-view, lobby-view, Dockerfile, docker/start.sh — or re-upload the whole zip) → Render auto-redeploys
+   233→
+   234→---
+   235→Task ID: 14
+   236→Agent: Super Z (main agent)
+   237→Task: (a) Taking the Main Seat should close the side panel and show the main room; (b) the app should ask for mic+camera permission while joining the room
+   238→
+   239→Work Log:
+   240→- (a) Root cause: RoomView mounts with the stage side-panel open by default; takeSeat had no success notification, so after grabbing the Main Seat the panel stayed open covering the video grid
+   241→- use-room.takeSeat rewritten: takes {onError,onSuccess} handlers; emits stage-take and fires onSuccess ONLY on server confirmation (room-view closes the panel there — a failed take, e.g. seat already occupied, keeps the panel open so the error stays visible)
+   242→- room-view.tsx: onTakeSeat prop is now (onSuccess?) => void; StagePanel wiring closes the side panel (setPanel(null)) inside the server-confirmed callback; stage-panel.tsx: prop type updated + onClick wrapped as () => onTakeSeat() (a bare onClick={onTakeSeat} would pass the MouseEvent as the onSuccess callback)
+   243→- (b) Join dialog restructured in page.tsx: PRIMARY action is now "Join room" whose description says the browser will ask for audio & video permission — confirmJoin(true) acquires mic+cam via getUserMedia BEFORE the socket join, so the permission prompt fires exactly at join time; the no-prompt path is demoted to a quiet secondary "Join without mic & camera (listener)" button; testids join-singer/join-listener kept
+   244→- Bonus consistency fix: a LISTENER tapping "Take the Main Seat" now gets ONE combined mic+camera prompt on that tap (use-room.takeSeat acquires + publishStreamToPeers before emitting); if media is blocked the seat take is refused with a clear toast instead of sitting down silently muted
+   245→- Validation: tsc + eslint clean; next build clean; browser E2E through edge-proxy :8099 → :3000/:3003 with an in-page fake media device (canvas.captureStream + oscillator audio overriding getUserMedia): join as singer → room joined, window.__gum===1 (permission requested exactly once at join), stage panel open → click take-seat → server confirms → side-panel gets translate-x-full (closed), video grid visible, header shows "🎤 JhankarRider85 on the Main Seat"; screenshot download/fix-seat-closes-panel.png; zero page errors
+   246→- Ops note: sandbox reaps detached processes between tool calls — the edge proxy died mid-flow twice (first join attempt lost its socket: gum still counted, join never confirmed); final E2E ran proxy+flow inside one call
+   247→- Repackaged: download/singalong-github.zip (260 KB) after clean build; leak scan clean
+   248→
+   249→Stage Summary:
+   250→- Joining now leads with the mic+camera permission (browser prompt at join time), and taking the Main Seat lands the singer straight on the main room view with the side panel out of the way
+   251→- User action: replace repo contents with the updated zip (changed: use-room.ts, page.tsx, room-view.tsx, stage-panel.tsx) → Render auto-redeploys
+   252→

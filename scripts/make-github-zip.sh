@@ -15,6 +15,8 @@ rsync -a \
   --exclude '.next/' \
   --exclude 'db/*.db' \
   --exclude 'db/*.db-journal' \
+  --exclude 'db/*.json' \
+  --exclude 'db/*.tmp' \
   --include '.env.example' \
   --exclude '.env' \
   --exclude '.env.*' \

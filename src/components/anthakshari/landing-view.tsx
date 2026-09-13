@@ -1,19 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Heart, Loader2, LocateFixed, Shuffle, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { INDIAN_STATES, AnonymousProfile } from '@/lib/indian-states'
-
-interface LeaderboardSinger {
-  name: string
-  state: string
-  points: number
-  hearts: number
-  poppers: number
-  performances: number
-}
+import { useLeaderboard } from '@/hooks/use-leaderboard'
 
 interface LandingViewProps {
   profile: AnonymousProfile
@@ -39,25 +31,11 @@ export function LandingView({
   detectNote,
 }: LandingViewProps) {
   const [search, setSearch] = useState('')
-  const [board, setBoard] = useState<LeaderboardSinger[] | null>(null)
+  const { singers: board, status, reload: loadBoard } = useLeaderboard()
 
   const states = INDIAN_STATES.filter((s) =>
     s.name.toLowerCase().includes(search.trim().toLowerCase()),
   )
-
-  const loadBoard = useCallback(async () => {
-    try {
-      const res = await fetch('/api/leaderboard')
-      const data = await res.json()
-      if (data?.ok) setBoard(data.singers ?? [])
-    } catch {}
-  }, [])
-
-  useEffect(() => {
-    // fetch-then-render; safe to run once on mount
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadBoard()
-  }, [loadBoard])
 
   return (
     <div className="min-h-[100dvh] bg-[#141414] pb-16 text-white">
@@ -228,6 +206,7 @@ export function LandingView({
             size="sm"
             variant="ghost"
             onClick={loadBoard}
+            data-testid="leaderboard-refresh"
             className="h-7 rounded-full px-2 text-[11px] text-neutral-400 hover:text-white"
           >
             Refresh
@@ -240,7 +219,22 @@ export function LandingView({
 
         <div className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/60">
           {board && board.length > 0 ? (
-            <ol className="divide-y divide-neutral-800">
+            <>
+              {status === 'error' && (
+                <p
+                  className="border-b border-[#E50914]/30 bg-[#E50914]/10 px-4 py-2 text-[11px] text-[#ff6b6b]"
+                  data-testid="leaderboard-error"
+                >
+                  Couldn&apos;t refresh — showing the last board.
+                  <button
+                    onClick={loadBoard}
+                    className="ml-1 font-bold text-[#E50914] underline underline-offset-2 hover:text-[#F6121D]"
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
+              <ol className="divide-y divide-neutral-800">
               {board.slice(0, 10).map((s, i) => (
                 <li
                   key={s.name}
@@ -270,9 +264,20 @@ export function LandingView({
                 </li>
               ))}
             </ol>
+            </>
+          ) : status === 'error' ? (
+            <p className="px-4 py-8 text-center text-xs leading-relaxed text-neutral-500" data-testid="leaderboard-error">
+              Couldn&apos;t load the board just now.
+              <button
+                onClick={loadBoard}
+                className="ml-1 font-bold text-[#E50914] underline-offset-2 hover:underline"
+              >
+                Retry
+              </button>
+            </p>
           ) : (
             <p className="px-4 py-8 text-center text-xs leading-relaxed text-neutral-500" data-testid="leaderboard-empty">
-              {board === null ? (
+              {status === 'loading' ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading the board…
                 </span>

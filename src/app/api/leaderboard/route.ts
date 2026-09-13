@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { listSingers } from '@/lib/scores'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,29 +7,18 @@ export const dynamic = 'force-dynamic'
  * GET /api/leaderboard?state=Maharashtra
  * Top singers by lifetime applause points (popper +10 / heart +100).
  * Without `state` returns the All-India board shown on the home page.
+ * Backed by src/lib/scores.ts (atomic JSON file — no native dependencies).
  */
 export async function GET(req: NextRequest) {
   try {
     const state = req.nextUrl.searchParams.get('state')?.trim() ?? ''
 
-    const singers = await db.singerScore.findMany({
-      where: state ? { state } : undefined,
-      orderBy: [{ points: 'desc' }, { hearts: 'desc' }, { updatedAt: 'desc' }],
-      take: 20,
-    })
+    const singers = await listSingers(state || undefined)
 
     return NextResponse.json({
       ok: true,
       state: state || 'All India',
-      singers: singers.map((s) => ({
-        name: s.name,
-        state: s.state,
-        points: s.points,
-        poppers: s.poppers,
-        hearts: s.hearts,
-        performances: s.performances,
-        updatedAt: s.updatedAt,
-      })),
+      singers,
     })
   } catch (e) {
     console.error('leaderboard GET failed:', e)

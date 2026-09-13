@@ -9,7 +9,8 @@ interface StagePanelProps {
   stage: StageState | null
   participants: Participant[]
   myId: string
-  onTakeSeat: () => void
+  /** onSuccess fires when the server confirms the seat (used by RoomView to close the panel) */
+  onTakeSeat: (onSuccess?: () => void) => void
   onLeaveSeat: () => void
   onAward: (kind: ApplauseKind) => void
 }
@@ -60,7 +61,7 @@ export function StagePanel({ stage, participants, myId, onTakeSeat, onLeaveSeat,
               </p>
             </div>
             <Button
-              onClick={onTakeSeat}
+              onClick={() => onTakeSeat()}
               className="h-12 w-full max-w-xs rounded-md bg-[#E50914] text-sm font-black uppercase tracking-widest hover:bg-[#F6121D]"
               data-testid="take-seat"
             >

@@ -106,6 +106,7 @@ export function RoomControls({
         size="icon"
         onClick={onLeave}
         aria-label="Leave room"
+        data-testid="leave-room"
         className="h-12 w-12 rounded-full bg-white text-black hover:bg-neutral-200 sm:h-11 sm:w-11"
       >
         {connecting ? <Loader2 className="h-5 w-5 animate-spin" /> : <LogOut className="h-5 w-5" />}

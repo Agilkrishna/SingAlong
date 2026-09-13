@@ -2,12 +2,23 @@
 
 import { useMemo, useState } from 'react'
 import { ChevronsLeft, ChevronsRight, Pause, Play, Users, Wifi, WifiOff, X } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { VideoTile } from './video-tile'
 import { RoomControls } from './room-controls'
 import { StagePanel, QuickAwardButtons } from './stage-panel'
 import { ChatPanel } from './chat-panel'
 import { KaraokePanel } from './karaoke-panel'
 import { ApplauseBursts } from './applause-bursts'
+import { ShareInviteButton } from './share-invite'
 import { RoomSnapshot, ChatMessage, KaraokeState, ApplauseEvent, ApplauseKind } from '@/hooks/use-room'
 
 export type SidePanel = 'stage' | 'chat' | 'karaoke' | null
@@ -26,7 +37,8 @@ interface RoomViewProps {
   onToggleMic: () => void
   onToggleCam: () => void
   onSendChat: (text: string) => void
-  onTakeSeat: () => void
+  /** onSuccess fires when the server confirms the seat — RoomView closes the side panel so the main room is visible */
+  onTakeSeat: (onSuccess?: () => void) => void
   onLeaveSeat: () => void
   onAward: (kind: ApplauseKind) => void
   onLeave: () => void
@@ -67,6 +79,7 @@ export function RoomView({
 }: RoomViewProps) {
   const [panel, setPanel] = useState<SidePanel>('stage')
   const [seenCount, setSeenCount] = useState(0)
+  const [confirmLeave, setConfirmLeave] = useState(false)
 
   // side-panel width — shrink / expand to taste (the karaoke search + player
   // benefit the most: wide shows bigger video & search, compact keeps the
@@ -119,6 +132,12 @@ export function RoomView({
             {stage && <span className="ml-1.5 text-[#E50914]">· 🎤 {stage.singerName} on the Main Seat</span>}
           </p>
         </div>
+        <ShareInviteButton
+          roomId={room.id}
+          roomName={room.name}
+          stateName={room.state}
+          variant="icon"
+        />
         <span className="flex items-center gap-1.5 rounded-full bg-neutral-800/80 px-2.5 py-1 text-[11px] font-bold text-neutral-300">
           <Users className="h-3.5 w-3.5" />
           {participants.length}/8
@@ -170,21 +189,34 @@ export function RoomView({
             )}
           </div>
           {participants.length === 1 && (
-            <p className="mx-auto mt-4 max-w-md text-center text-xs leading-relaxed text-neutral-500">
-              You&apos;re the first one here! Share the room code{' '}
-              <span className="font-black text-[#E50914]">
-                {room.id.replace('state:', '').toUpperCase()}
-              </span>{' '}
-              with singers in {room.state} — or wait for someone to join.
-            </p>
+            <div className="mx-auto mt-4 max-w-md text-center">
+              <p className="text-xs leading-relaxed text-neutral-500">
+                You&apos;re the first one here! Room code{' '}
+                <span className="font-black text-[#E50914]">
+                  {room.id.replace('state:', '').toUpperCase()}
+                </span>{' '}
+                — one tap below sends your friends a WhatsApp invite that drops
+                them straight into this room.
+              </p>
+              <ShareInviteButton
+                roomId={room.id}
+                roomName={room.name}
+                stateName={room.state}
+                variant="full"
+                testId="room-share-solo"
+              />
+            </div>
           )}
         </div>
 
-        {/* sliding side panel (stage / chat / karaoke) — shrinkable / expandable */}
+        {/* sliding side panel (stage / chat / karaoke) — shrinkable / expandable.
+            When the mini now-playing bar floats above the panel it covers the
+            bottom ~60px (exactly where the chat input row lives) — pad the
+            panel so interactive controls always sit ABOVE the bar. */}
         <aside
           className={`absolute inset-y-0 right-0 z-20 flex w-full ${panelWidthClass} transform flex-col border-l border-neutral-800 bg-[#141414] transition-all duration-300 ease-out ${
             panelOpen ? 'translate-x-0' : 'translate-x-full'
-          }`}
+          } ${showMiniPlayer ? 'pb-[70px]' : ''}`}
           data-testid="side-panel"
           data-panel-size={panelSize}
         >
@@ -252,7 +284,14 @@ export function RoomView({
               stage={stage}
               participants={participants}
               myId={myId}
-              onTakeSeat={onTakeSeat}
+              onTakeSeat={(onSuccess?: () => void) =>
+                onTakeSeat(() => {
+                  onSuccess?.()
+                  // seated! drop the side panel so the main room (video grid)
+                  // is in front of the singer right away
+                  setPanel(null)
+                })
+              }
               onLeaveSeat={onLeaveSeat}
               onAward={onAward}
             />
@@ -277,8 +316,39 @@ export function RoomView({
         }}
         onToggleStage={() => setPanel((p) => (p === 'stage' ? null : 'stage'))}
         onToggleKaraoke={() => setPanel((p) => (p === 'karaoke' ? null : 'karaoke'))}
-        onLeave={onLeave}
+        onLeave={() => setConfirmLeave(true)}
       />
+
+      {/* leave confirmation — leaving frees your seat, so make it deliberate */}
+      <AlertDialog open={confirmLeave} onOpenChange={setConfirmLeave}>
+        <AlertDialogContent
+          className="border-neutral-800 bg-[#141414] text-white"
+          data-testid="leave-confirm"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">Leave the room?</AlertDialogTitle>
+            <AlertDialogDescription className="text-neutral-400">
+              You&apos;ll return to the lobby and the Main Seat will free up if you’re
+              on it. Your points are already saved.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="border-neutral-700 bg-neutral-800 text-neutral-200 hover:bg-neutral-700 hover:text-white"
+              data-testid="leave-cancel"
+            >
+              Stay
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-[#E50914] text-white hover:bg-[#F6121D]"
+              data-testid="leave-confirm-action"
+              onClick={onLeave}
+            >
+              Yes, leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* quick-award popper / heart — always at hand while someone else sings */}
       {stage && !iAmOnSeat && (

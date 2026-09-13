@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ArrowLeft, Heart, Loader2, Plus, Trophy } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { stateByName } from '@/lib/indian-states'
 import { LobbyRoom } from '@/hooks/use-room'
+import { useLeaderboard } from '@/hooks/use-leaderboard'
 
 interface LobbyViewProps {
   state: string
@@ -17,10 +18,6 @@ interface LobbyViewProps {
   onJoin: (roomId: string) => void
   onCreateRoom: (name: string) => void
   onJoinByCode: (code: string) => void
-}
-
-interface LeaderboardData {
-  singers: { name: string; points: number; hearts: number; performances: number }[]
 }
 
 export function LobbyView({
@@ -37,21 +34,7 @@ export function LobbyView({
   const meta = stateByName(state)
   const [newRoomName, setNewRoomName] = useState('')
   const [code, setCode] = useState('')
-  const [board, setBoard] = useState<LeaderboardData | null>(null)
-
-  const loadBoard = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/leaderboard?state=${encodeURIComponent(state)}`)
-      const data = await res.json()
-      if (data?.ok) setBoard(data)
-    } catch {}
-  }, [state])
-
-  useEffect(() => {
-    // fetch resolves before setState, so the update is async (fetch-then-render)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadBoard()
-  }, [loadBoard])
+  const { singers: board, status, reload: loadBoard } = useLeaderboard(state)
 
   const featured = rooms.find((r) => r.isDefault)
   const others = rooms.filter((r) => !r.isDefault)
@@ -194,14 +177,30 @@ export function LobbyView({
                 onRefresh()
                 loadBoard()
               }}
+              data-testid="leaderboard-refresh"
               className="h-7 rounded-full px-2 text-[11px] text-neutral-400 hover:text-white"
             >
               Refresh
             </Button>
           </div>
-          {board && board.singers.length > 0 ? (
-            <ol className="space-y-1">
-              {board.singers.slice(0, 8).map((s, i) => (
+          {board && board.length > 0 ? (
+            <>
+              {status === 'error' && (
+                <p
+                  className="mb-2 rounded-md border border-[#E50914]/30 bg-[#E50914]/10 px-2 py-1.5 text-[11px] text-[#ff6b6b]"
+                  data-testid="leaderboard-error"
+                >
+                  Couldn&apos;t refresh — showing the last board.
+                  <button
+                    onClick={loadBoard}
+                    className="ml-1 font-bold text-[#E50914] underline underline-offset-2 hover:text-[#F6121D]"
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
+              <ol className="space-y-1">
+              {board.slice(0, 8).map((s, i) => (
                 <li
                   key={s.name}
                   className={`flex items-center gap-2.5 rounded-md px-2 py-1.5 ${i < 3 ? 'bg-[#E50914]/10' : ''}`}
@@ -220,9 +219,20 @@ export function LobbyView({
                 </li>
               ))}
             </ol>
+            </>
+          ) : status === 'error' ? (
+            <p className="py-2 text-xs text-neutral-600" data-testid="leaderboard-error">
+              Couldn&apos;t load the board just now.
+              <button
+                onClick={loadBoard}
+                className="ml-1 font-bold text-[#E50914] underline-offset-2 hover:underline"
+              >
+                Retry
+              </button>
+            </p>
           ) : (
-            <p className="py-2 text-xs text-neutral-600">
-              {board === null
+            <p className="py-2 text-xs text-neutral-600" data-testid="leaderboard-empty">
+              {status === 'loading'
                 ? 'Loading…'
                 : `No applause recorded in ${state} yet — take the Main Seat and earn the first popper!`}
             </p>
