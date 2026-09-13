@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ListMusic, Pause, Play, Search, Volume2, VolumeX, X, Youtube } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -34,6 +35,9 @@ type YTPlayer = {
 interface KaraokePanelProps {
   karaoke: KaraokeState | null
   myId: string
+  /** true while the karaoke tab is the open side-panel tab — the portal
+   *  "tap to listen" banner is only shown when this panel can't be seen */
+  panelVisible: boolean
   onLoad: (videoId: string, title: string) => void
   onPlay: (position: number) => void
   onPause: (position: number) => void
@@ -46,6 +50,7 @@ interface KaraokePanelProps {
 export function KaraokePanel({
   karaoke,
   myId,
+  panelVisible,
   onLoad,
   onPlay,
   onPause,
@@ -246,6 +251,32 @@ export function KaraokePanel({
     setMediaMuted(next)
   }, [mediaMuted])
 
+  /* --------- one-tap local playback join (autoplay-block recovery) -------- */
+  // The room is already playing — this only starts THIS device's speaker, so
+  // the echo-guard is armed and nothing is broadcast (no position jitter).
+  const joinLocally = useCallback(() => {
+    const player = playerRef.current
+    if (!player) return
+    applyingUntilRef.current = Date.now() + 1400
+    setNeedsGesture(false)
+    try {
+      if (mediaMuted) {
+        player.unMute()
+        setMediaMuted(false)
+      }
+      player.playVideo()
+    } catch {}
+  }, [mediaMuted])
+
+  // Browsers only need ONE user gesture — so while autoplay is blocked, a tap
+  // anywhere in the app (opening a panel, sending a chat…) joins playback too.
+  useEffect(() => {
+    if (!needsGesture) return
+    const onAnyTap = () => joinLocally()
+    document.addEventListener('pointerdown', onAnyTap, true)
+    return () => document.removeEventListener('pointerdown', onAnyTap, true)
+  }, [needsGesture, joinLocally])
+
   /* ------- messages from the /karaoke-search iframe (separate window) ----- */
   useEffect(() => {
     const onMessage = (ev: MessageEvent) => {
@@ -322,15 +353,11 @@ export function KaraokePanel({
               </p>
             </div>
           )}
-          {needsGesture && (
+          {needsGesture && isPlaying && (
             <button
-              onClick={() => {
-                const player = playerRef.current
-                if (!player) return
-                setNeedsGesture(false)
-                applyingUntilRef.current = Date.now() + 1400
-                player.playVideo()
-                onPlay(player.getCurrentTime())
+              onClick={(e) => {
+                e.stopPropagation()
+                joinLocally()
               }}
               className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/70 backdrop-blur-[2px]"
               data-testid="tap-to-sync"
@@ -473,6 +500,43 @@ export function KaraokePanel({
           )}
         </div>
       )}
+
+      {/* room-wide "tap to listen" banner — shown OUTSIDE this panel (portal)
+          whenever the room is playing but this device isn't heard yet: either
+          autoplay was blocked (needsGesture) or the user muted the media.
+          One tap — on the banner or anywhere — joins the music. */}
+      {hasTrack && isPlaying && playerReady && !panelVisible && (needsGesture || mediaMuted) &&
+        createPortal(
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              joinLocally()
+            }}
+            data-testid="listen-banner"
+            aria-label={mediaMuted ? 'Unmute and listen to the song' : 'Join song playback'}
+            className="fixed inset-x-3 bottom-[136px] z-50 flex items-center gap-3 rounded-xl border border-[#E50914]/60 bg-black/95 px-4 py-3 text-left shadow-[0_10px_40px_rgba(0,0,0,0.7)] backdrop-blur transition hover:border-[#E50914] sm:inset-x-auto sm:left-1/2 sm:w-[26rem] sm:-translate-x-1/2"
+          >
+            <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E50914]">
+              <span className="absolute inset-0 animate-ping rounded-full bg-[#E50914]/40" />
+              <Volume2 className="relative h-5 w-5 text-white" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className="block text-xs font-black uppercase tracking-wide text-white"
+                data-testid="listen-banner-title"
+              >
+                {mediaMuted ? 'You’re muted — tap for sound' : 'Song live on stage'}
+              </span>
+              <span className="block truncate text-[10px] text-neutral-400">
+                {mediaMuted
+                  ? 'One tap and you’re back in the music'
+                  : `Tap anywhere to hear “${karaoke?.title || 'the song'}”`}
+              </span>
+            </span>
+            <Play className="h-4 w-4 shrink-0 fill-[#E50914] text-[#E50914]" />
+          </button>,
+          document.body,
+        )}
     </div>
   )
 }

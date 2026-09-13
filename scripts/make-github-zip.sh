@@ -41,13 +41,18 @@ cd "$STAGE"
 zip -qr "$ZIP" .
 echo "---- verify ----"
 unzip -l "$ZIP" | tail -3
+ZLIST=$(unzip -Z1 "$ZIP")
 echo "---- key files present ----"
-for f in Dockerfile docker/start.sh Caddyfile.prod render.yaml DEPLOY.md README.md LICENSE .env.example .dockerignore package.json bun.lock prisma/schema.prisma src/app/page.tsx mini-services/anthakshari-service/index.ts; do
-  if unzip -Z1 "$ZIP" | grep -qxF "$f"; then echo "  ✓ $f"; else echo "  ✗ MISSING: $f"; fi
+for f in Dockerfile docker/start.sh Caddyfile.prod render.yaml DEPLOY.md README.md LICENSE .env.example .dockerignore package.json bun.lock prisma/schema.prisma src/app/page.tsx src/app/favicon.ico src/app/icon.svg src/app/apple-icon.png mini-services/anthakshari-service/index.ts; do
+  if grep -qxF "$f" <<<"$ZLIST"; then echo "  ✓ $f"; else echo "  ✗ MISSING: $f"; fi
 done
 echo "---- leak scan (must be empty) ----"
 unzip -l "$ZIP" | grep -Ei '\.env$|\.env\.local|node_modules|\.next/|custom\.db$|worklog|\.log$' || echo "  ✓ no leaks"
-unzip -p "$ZIP" Dockerfile | grep -q 'caddy-with-caps' && echo "  ✓ Dockerfile is the FIXED version"
-unzip -p "$ZIP" docker/start.sh | grep -q '\-\-schema /app/prisma/schema.prisma' && echo "  ✓ start.sh is the FIXED version"
+unzip -p "$ZIP" Dockerfile | grep -q 'edge-proxy.js' && echo "  ✓ Dockerfile is the edge-proxy version"
+unzip -p "$ZIP" docker/start.sh | grep -q 'exec bun /app/edge-proxy.js' && echo "  ✓ start.sh is the edge-proxy version"
+unzip -p "$ZIP" docker/start.sh | grep -q '\-\-schema /app/prisma/schema.prisma' && echo "  ✓ start.sh has absolute prisma schema path"
+unzip -Z1 "$ZIP" | grep -qxF 'src/app/favicon.ico' && echo "  ✓ red favicon.ico included"
+unzip -Z1 "$ZIP" | grep -qxF 'src/app/icon.svg' && echo "  ✓ icon.svg included"
+unzip -Z1 "$ZIP" | grep -qxF 'src/app/apple-icon.png' && echo "  ✓ apple-icon.png included"
 unzip -p "$ZIP" DEPLOY.md | grep -q 'Mistral' && echo "  ✓ DEPLOY.md has Koyeb-closure note"
 ls -lh "$ZIP"

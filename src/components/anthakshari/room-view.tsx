@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronsLeft, ChevronsRight, Pause, Play, Users, Wifi, WifiOff } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, Pause, Play, Users, Wifi, WifiOff, X } from 'lucide-react'
 import { VideoTile } from './video-tile'
 import { RoomControls } from './room-controls'
 import { StagePanel, QuickAwardButtons } from './stage-panel'
@@ -188,12 +188,24 @@ export function RoomView({
           data-testid="side-panel"
           data-panel-size={panelSize}
         >
-          {/* shrink / expand handle — sits on the panel's left edge */}
+          {/* shrink / expand / close handle — sits on the panel's left edge.
+              The ✕ matters most on phones, where the panel covers the whole
+              screen and this is the way back to the video grid. */}
           {panelOpen && (
             <div
               className="absolute left-0 top-1/2 z-30 flex -translate-x-full -translate-y-1/2 flex-col overflow-hidden rounded-l-lg border border-r-0 border-neutral-800 bg-[#141414]/95 shadow-lg shadow-black/50 backdrop-blur"
               data-testid="panel-resize-handle"
             >
+              <button
+                onClick={() => setPanel(null)}
+                aria-label="Close panel — back to the stage"
+                title="Close panel"
+                data-testid="panel-close"
+                className="flex h-10 w-8 items-center justify-center text-neutral-400 transition hover:bg-[#E50914] hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <div className="h-px w-full bg-neutral-800" />
               <button
                 onClick={growPanel}
                 disabled={panelSize === 'wide'}
@@ -222,6 +234,7 @@ export function RoomView({
             <KaraokePanel
               karaoke={karaoke}
               myId={myId}
+              panelVisible={panel === 'karaoke'}
               onLoad={onKaraokeLoad}
               onPlay={onKaraokePlay}
               onPause={onKaraokePause}

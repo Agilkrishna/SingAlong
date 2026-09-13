@@ -17,6 +17,7 @@
  */
 
 import { createServer } from 'http'
+import { randomUUID } from 'node:crypto'
 import { Server, Socket } from 'socket.io'
 
 const PORT = 3003
@@ -140,7 +141,9 @@ const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
 const randomCode = (len = 5) =>
   Array.from({ length: len }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('')
 
-const msgId = () => Math.random().toString(36).slice(2, 11)
+// crypto-unique ids: React uses these as list keys, so even one collision is
+// visible to users ("Encountered two children with the same key")
+const msgId = () => randomUUID()
 
 const AVATAR_COLORS = ['#E50914', '#F5A623', '#2ECC71', '#1ABC9C', '#9B59B6', '#E91E63', '#F39C12', '#00BCD4', '#8BC34A', '#FF5722']
 
@@ -195,10 +198,19 @@ function roomSnapshot(room: Room) {
   }
 }
 
-function sysMsg(room: Room, text: string) {
-  const m: ChatMessage = { id: msgId(), type: 'system', text, at: Date.now() }
+/**
+ * Single choke-point for writing to room.chat — guarantees no message id ever
+ * lands twice (duplicate ids would render duplicate React keys in chat).
+ */
+function pushChat(room: Room, m: ChatMessage) {
+  if (room.chat.some((c) => c.id === m.id)) return
   room.chat.push(m)
   if (room.chat.length > CHAT_HISTORY * 2) room.chat = room.chat.slice(-CHAT_HISTORY)
+}
+
+function sysMsg(room: Room, text: string) {
+  const m: ChatMessage = { id: msgId(), type: 'system', text, at: Date.now() }
+  pushChat(room, m)
   return m
 }
 
@@ -423,7 +435,6 @@ io.on('connection', (socket: Socket) => {
             room.participants.get(socket.id)!.isHost = true
           }
           const m = sysMsg(room, `${name} joined the stage 🎤`)
-          room.chat.push(m)
           io.to(room.id).emit('participant-joined', {
             participant: room.participants.get(socket.id),
             message: m,
@@ -502,8 +513,7 @@ io.on('connection', (socket: Socket) => {
       text,
       at: Date.now(),
     }
-    room.chat.push(m)
-    if (room.chat.length > CHAT_HISTORY * 2) room.chat = room.chat.slice(-CHAT_HISTORY)
+    pushChat(room, m)
     io.to(room.id).emit('chat', { message: m })
   })
 

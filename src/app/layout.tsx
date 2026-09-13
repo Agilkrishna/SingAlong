@@ -27,9 +27,6 @@ export const metadata: Metadata = {
     "open source",
   ],
   authors: [{ name: "SingAlong" }],
-  icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
-  },
   openGraph: {
     title: "SingAlong — Anthakshari with your entire State. Live.",
     description:

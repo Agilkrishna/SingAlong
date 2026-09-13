@@ -108,6 +108,23 @@ export interface JoinOptions {
 
 export type MediaError = { kind: 'denied' | 'unavailable' | 'none'; message: string }
 
+const CHAT_HISTORY = 60
+
+/**
+ * Chat ids are React list keys — never let a snapshot put the same id twice.
+ * Keeps the first occurrence, drops malformed entries, caps history.
+ */
+function dedupeChat(chat: ChatMessage[] | undefined): ChatMessage[] {
+  const seen = new Set<string>()
+  const out: ChatMessage[] = []
+  for (const m of chat ?? []) {
+    if (!m?.id || seen.has(m.id)) continue
+    seen.add(m.id)
+    out.push(m)
+  }
+  return out.slice(-CHAT_HISTORY)
+}
+
 // STUN is enough for most networks. For strict/symmetric NATs (some mobile
 // carriers) set NEXT_PUBLIC_TURN_URL / NEXT_PUBLIC_TURN_USERNAME /
 // NEXT_PUBLIC_TURN_CREDENTIAL at BUILD time to add a TURN relay.
@@ -309,7 +326,8 @@ export function useRoom() {
       s.on('disconnect', () => setConnected(false))
 
       s.on('room-state', (data: { room: RoomSnapshot }) => {
-        setRoom(data.room)
+        // dedupe guards against any legacy/mid-deploy server still double-writing chat
+        setRoom(data.room ? { ...data.room, chat: dedupeChat(data.room.chat) } : data.room)
         // mesh: initiate offers to peers who joined after me
         const myJoin = data.room.participants.find((p) => p.id === s.id)?.joinedAt ?? Infinity
         data.room.participants.forEach((p) => {
@@ -328,7 +346,7 @@ export function useRoom() {
         if (!m || !m.id) return
         setRoom((r) =>
           r && !r.chat.some((c) => c.id === m.id)
-            ? { ...r, chat: [...r.chat, m].slice(-60) }
+            ? { ...r, chat: [...r.chat, m].slice(-CHAT_HISTORY) }
             : r,
         )
       })
@@ -444,7 +462,15 @@ export function useRoom() {
   const joinRoom = useCallback(
     async (opts: JoinOptions) => {
       setJoinError('')
-      const gotMedia = await acquireLocalMedia(opts.camOn)
+      // listener mode (no mic, no cam) skips the permission prompt entirely —
+      // the browser never asks for camera/microphone on join
+      const wantMedia = opts.micOn || opts.camOn
+      const gotMedia = wantMedia ? await acquireLocalMedia(opts.camOn) : false
+      if (!wantMedia) {
+        setMicOn(false)
+        setCamOn(false)
+        setMediaError(null)
+      }
       const socket = socketRef.current
       if (!socket) {
         setJoinError('Still connecting… try again in a second.')
@@ -483,25 +509,71 @@ export function useRoom() {
     pendingIceRef.current.clear()
   }, [])
 
-  const toggleMic = useCallback(() => {
-    const stream = localStreamRef.current
-    if (!stream) return false
-    const next = !micOn
-    stream.getAudioTracks().forEach((t) => (t.enabled = next))
-    setMicOn(next)
-    socketRef.current?.emit('media-state', { micOn: next, camOn })
-    return next
-  }, [micOn, camOn])
+  /* ---------------------- listener → singer upgrade ----------------------- */
 
-  const toggleCam = useCallback(() => {
-    const stream = localStreamRef.current
-    if (!stream || stream.getVideoTracks().length === 0) return false
-    const next = !camOn
-    stream.getVideoTracks().forEach((t) => (t.enabled = next))
-    setCamOn(next)
-    socketRef.current?.emit('media-state', { micOn, camOn: next })
-    return next
-  }, [micOn, camOn])
+  // A listener joined without media; when they later tap mic/cam we acquire
+  // the stream, attach it to every existing peer connection and re-offer.
+  const publishStreamToPeers = useCallback(
+    (stream: MediaStream) => {
+      pcsRef.current.forEach((pc) => {
+        stream.getTracks().forEach((track) => {
+          try {
+            pc.addTrack(track, stream)
+          } catch {}
+        })
+      })
+      // renegotiate with every peer so they start receiving our tracks
+      pcsRef.current.forEach((_pc, peerId) => {
+        void startOffer(peerId)
+      })
+    },
+    [startOffer],
+  )
+
+  const toggleMic = useCallback(
+    async (onError?: (msg: string) => void) => {
+      let stream = localStreamRef.current
+      if (!stream) {
+        // listener upgrading to singer — ask for mic (camera included so the
+        // full upgrade happens in one permission prompt)
+        const got = await acquireLocalMedia(true)
+        stream = localStreamRef.current
+        if (!got || !stream) {
+          onError?.('Mic & camera are blocked — check your browser permissions.')
+          return false
+        }
+        publishStreamToPeers(stream)
+      }
+      const next = !micOn
+      stream.getAudioTracks().forEach((t) => (t.enabled = next))
+      setMicOn(next)
+      socketRef.current?.emit('media-state', { micOn: next, camOn })
+      return next
+    },
+    [micOn, camOn, acquireLocalMedia, publishStreamToPeers],
+  )
+
+  const toggleCam = useCallback(
+    async (onError?: (msg: string) => void) => {
+      let stream = localStreamRef.current
+      if (!stream) {
+        const got = await acquireLocalMedia(true)
+        stream = localStreamRef.current
+        if (!got || !stream) {
+          onError?.('Mic & camera are blocked — check your browser permissions.')
+          return false
+        }
+        publishStreamToPeers(stream)
+      }
+      if (stream.getVideoTracks().length === 0) return false
+      const next = !camOn
+      stream.getVideoTracks().forEach((t) => (t.enabled = next))
+      setCamOn(next)
+      socketRef.current?.emit('media-state', { micOn, camOn: next })
+      return next
+    },
+    [micOn, camOn, acquireLocalMedia, publishStreamToPeers],
+  )
 
   const sendChat = useCallback((text: string) => {
     if (text.trim()) socketRef.current?.emit('chat', { text: text.trim() })

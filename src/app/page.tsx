@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { Headphones, Loader2, Mic } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { useRoom, ApplauseKind } from '@/hooks/use-room'
 import {
@@ -11,11 +12,17 @@ import {
   detectStateFromCoords,
   AnonymousProfile,
 } from '@/lib/indian-states'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { LandingView } from '@/components/anthakshari/landing-view'
 import { LobbyView } from '@/components/anthakshari/lobby-view'
 import { RoomView } from '@/components/anthakshari/room-view'
 
 type View = 'landing' | 'lobby' | 'room'
+
+interface PendingJoin {
+  roomId: string
+  name: string
+}
 
 export default function Home() {
   const { toast } = useToast()
@@ -43,6 +50,8 @@ export default function Home() {
   const [detecting, setDetecting] = useState(false)
   const [detectNote, setDetectNote] = useState('')
   const [creating, setCreating] = useState(false)
+  const [pendingJoin, setPendingJoin] = useState<PendingJoin | null>(null)
+  const [joining, setJoining] = useState(false)
   const lobbyPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // hydrate stored profile (client only, after mount to avoid SSR mismatch).
@@ -80,6 +89,38 @@ export default function Home() {
   }, [view, state, roomApi.listRooms])
 
   /* ------------------------------ handlers -------------------------------- */
+
+  // step 1 — the lobby asks HOW to join (singer / listener) before touching
+  // the camera; the dialog's ✕ cancels and stays in the lobby
+  const requestJoin = useCallback((roomId: string, knownName?: string) => {
+    setPendingJoin((prev) =>
+      prev ?? { roomId, name: knownName || `Room code ${roomId}` },
+    )
+  }, [])
+
+  // step 2 — actually connect with the chosen media mode
+  const confirmJoin = useCallback(
+    async (asSinger: boolean) => {
+      if (!pendingJoin || !profile || joining) return
+      setJoining(true)
+      const ok = await roomApi.joinRoom({
+        roomId: pendingJoin.roomId,
+        state,
+        profile,
+        pid: profile.pid,
+        micOn: asSinger,
+        camOn: asSinger,
+      })
+      setJoining(false)
+      setPendingJoin(null)
+      if (ok) {
+        setView('room')
+      } else {
+        toast({ title: 'Could not join', description: roomApi.joinError || 'Try again' })
+      }
+    },
+    [pendingJoin, profile, joining, roomApi, state, toast],
+  )
 
   const handleDetectLocation = useCallback(() => {
     if (!('geolocation' in navigator)) {
@@ -128,26 +169,6 @@ export default function Home() {
     setWelcomeBack(true)
   }, [])
 
-  const handleJoin = useCallback(
-    async (roomId: string) => {
-      if (!profile) return
-      const ok = await roomApi.joinRoom({
-        roomId,
-        state,
-        profile,
-        pid: profile.pid,
-        micOn: true,
-        camOn: true,
-      })
-      if (ok) {
-        setView('room')
-      } else {
-        toast({ title: 'Could not join', description: roomApi.joinError || 'Try again' })
-      }
-    },
-    [profile, roomApi, state, toast],
-  )
-
   const handleCreateRoom = useCallback(
     async (name: string) => {
       if (!profile) return
@@ -155,12 +176,12 @@ export default function Home() {
       const roomId = await roomApi.createRoom(name, state)
       setCreating(false)
       if (roomId) {
-        handleJoin(roomId)
+        requestJoin(roomId, name)
       } else {
         toast({ title: 'Could not create room', description: 'Please try again.' })
       }
     },
-    [profile, roomApi, state, handleJoin, toast],
+    [profile, roomApi, state, requestJoin, toast],
   )
 
   const handleLeave = useCallback(() => {
@@ -186,6 +207,11 @@ export default function Home() {
   const handleTakeSeat = useCallback(
     () => roomApi.takeSeat(seatError),
     [roomApi, seatError],
+  )
+
+  const mediaError2Toast = useCallback(
+    (msg: string) => toast({ title: 'Microphone & camera', description: msg }),
+    [toast],
   )
 
   /* -------------------------------- render -------------------------------- */
@@ -221,9 +247,9 @@ export default function Home() {
           joinError={joinError}
           onBack={() => setView('landing')}
           onRefresh={() => state && roomApi.listRooms(state)}
-          onJoin={handleJoin}
+          onJoin={(roomId) => requestJoin(roomId, lobbyRooms.find((r) => r.id === roomId)?.name)}
           onCreateRoom={handleCreateRoom}
-          onJoinByCode={(code) => handleJoin(code)}
+          onJoinByCode={(code) => requestJoin(code)}
         />
       )}
 
@@ -239,8 +265,8 @@ export default function Home() {
           localStream={localStream}
           applause={applause}
           onClearApplause={roomApi.clearApplause}
-          onToggleMic={() => roomApi.toggleMic()}
-          onToggleCam={() => roomApi.toggleCam()}
+          onToggleMic={() => roomApi.toggleMic(mediaError2Toast)}
+          onToggleCam={() => roomApi.toggleCam(mediaError2Toast)}
           onSendChat={roomApi.sendChat}
           onTakeSeat={handleTakeSeat}
           onLeaveSeat={roomApi.leaveSeat}
@@ -255,6 +281,62 @@ export default function Home() {
           onKaraokeQueueRemove={roomApi.karaokeQueueRemove}
         />
       )}
+
+      {/* pre-join choice — singer (camera + mic) or listener (no permissions).
+          The built-in ✕ (and overlay click) cancels and stays in the lobby. */}
+      <Dialog open={!!pendingJoin} onOpenChange={(open) => !open && setPendingJoin(null)}>
+        <DialogContent
+          className="max-w-sm rounded-2xl border-neutral-800 bg-[#141414] gap-4"
+          data-testid="join-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="text-lg font-black text-white">Join this stage?</DialogTitle>
+            <DialogDescription className="text-xs text-neutral-400" data-testid="join-dialog-room">
+              {pendingJoin?.name}
+              {state ? ` · ${state}` : ''} — choose how you want to join
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2.5">
+            <button
+              onClick={() => confirmJoin(true)}
+              disabled={joining}
+              data-testid="join-singer"
+              className="rounded-xl border border-[#E50914]/60 bg-[#E50914]/15 p-4 text-left transition hover:bg-[#E50914]/25 disabled:opacity-50"
+            >
+              <span className="flex items-center gap-2 text-sm font-black text-white">
+                {joining ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-[#E50914]" />
+                ) : (
+                  <Mic className="h-4 w-4 text-[#E50914]" />
+                )}
+                Join as singer
+              </span>
+              <span className="mt-1 block text-xs leading-relaxed text-neutral-400">
+                Camera + mic on — grab the Main Seat and sing.
+              </span>
+            </button>
+            <button
+              onClick={() => confirmJoin(false)}
+              disabled={joining}
+              data-testid="join-listener"
+              className="rounded-xl border border-neutral-700 bg-neutral-900 p-4 text-left transition hover:border-neutral-500 disabled:opacity-50"
+            >
+              <span className="flex items-center gap-2 text-sm font-black text-white">
+                {joining ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-neutral-300" />
+                ) : (
+                  <Headphones className="h-4 w-4 text-neutral-300" />
+                )}
+                Join as listener
+              </span>
+              <span className="mt-1 block text-xs leading-relaxed text-neutral-400">
+                No camera or mic asked — watch, chat &amp; applaud. Become a singer later with the
+                mic button.
+              </span>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   )
 }
