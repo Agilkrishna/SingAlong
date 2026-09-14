@@ -76,6 +76,8 @@ export interface AnonymousProfile {
   pid: string
   name: string
   color: string
+  /** optional emoji avatar picked in the join dialog */
+  avatar?: string
 }
 
 function randomPid(): string {
@@ -113,11 +115,12 @@ export function loadProfile(): AnonymousProfile {
     if (raw) {
       const p = JSON.parse(raw)
       if (typeof p?.name === 'string' && typeof p?.color === 'string') {
-        // profiles saved before pid existed get one merged in
+        // profiles saved before pid/avatar existed get the missing bits merged in
         if (!p.pid) {
           p.pid = randomPid()
           saveProfile(p)
         }
+        if (typeof p.avatar !== 'string') p.avatar = ''
         return p
       }
     }

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { INDIAN_STATES, AnonymousProfile } from '@/lib/indian-states'
 import { useLeaderboard } from '@/hooks/use-leaderboard'
+import { useLang } from '@/lib/i18n'
 
 interface LandingViewProps {
   profile: AnonymousProfile
@@ -31,6 +32,7 @@ export function LandingView({
   detectNote,
 }: LandingViewProps) {
   const [search, setSearch] = useState('')
+  const { t, lang, toggleLang } = useLang()
   const { singers: board, status, reload: loadBoard } = useLeaderboard()
 
   const states = INDIAN_STATES.filter((s) =>
@@ -46,10 +48,20 @@ export function LandingView({
           style={{ textShadow: '0 2px 12px rgba(229,9,20,0.45)' }}
           data-testid="logo"
         >
-          SING&nbsp;ALONG
+          DESI&nbsp;HANGOUT
         </span>
-        <span className="rounded-full bg-neutral-800/90 px-3 py-1.5 text-xs text-neutral-300">
-          100% anonymous · free forever
+        <span className="flex items-center gap-2">
+          <span className="rounded-full bg-neutral-800/90 px-3 py-1.5 text-xs text-neutral-300">
+            {t('badge')}
+          </span>
+          <button
+            onClick={toggleLang}
+            data-testid="lang-toggle"
+            className="rounded-full border border-neutral-700 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-neutral-300 transition hover:border-[#E50914] hover:text-white"
+            title="English / Hinglish"
+          >
+            {lang === 'en' ? 'हिंदी' : 'EN'}
+          </button>
         </span>
       </header>
 
@@ -64,17 +76,16 @@ export function LandingView({
         />
         <div className="relative mx-auto max-w-3xl px-4 pb-10 pt-14 text-center sm:pt-20">
           <p className="mb-3 text-[11px] font-black uppercase tracking-[0.35em] text-[#E50914] sm:text-xs">
-            India&apos;s anonymous singing rooms
+            {t('eyebrow')}
           </p>
           <h1 className="text-4xl font-black leading-[1.05] tracking-tight sm:text-6xl">
-            Sing together with your
+            {t('hero1')}
             <span className="block bg-gradient-to-r from-[#E50914] via-[#ff4d4d] to-[#E50914] bg-clip-text text-transparent">
-              entire State. Live.
+              {t('hero2')}
             </span>
           </h1>
           <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-neutral-400 sm:text-base">
-            Video + voice rooms with singers from your state. Take the Main Seat, sing along to
-            YouTube karaoke, and get showered with poppers &amp; hearts. No sign-up, no phone number.
+            {t('heroSub')}
           </p>
 
           {/* anonymous identity */}
@@ -106,14 +117,11 @@ export function LandingView({
           <p className="mt-2 text-[11px] text-neutral-600" data-testid="identity-note">
             {welcomeBack ? (
               <span className="font-semibold text-neutral-400" data-testid="welcome-back">
-                👋 Welcome back, <b className="text-white">{profile.name}</b> — your stage name is saved
-                on this device. Names can&apos;t be copied by others inside a room.
+                👋 Welcome back, <b className="text-white">{profile.name}</b>{' '}
+                {t('savedNote')}
               </span>
             ) : (
-              <>
-                That&apos;s your only identity here — no email, no number, no trace. We&apos;ll
-                remember it for your next visit.
-              </>
+              <>{t('freshNote')}</>
             )}
           </p>
 
@@ -130,14 +138,14 @@ export function LandingView({
               ) : (
                 <LocateFixed className="mr-2 h-4 w-4" />
               )}
-              {detecting ? 'Finding you…' : 'Use my location'}
+              {detecting ? t('finding') : t('useLocation')}
             </Button>
             <Button
               onClick={() => document.getElementById('state-grid')?.scrollIntoView({ behavior: 'smooth' })}
               variant="outline"
               className="h-12 w-full max-w-xs rounded-md border-neutral-600 bg-white/5 text-sm font-bold uppercase tracking-widest text-white hover:bg-white/10 sm:w-56"
             >
-              Or pick your state
+              {t('pickState')}
             </Button>
           </div>
           {detectNote && (
@@ -152,12 +160,12 @@ export function LandingView({
       <section id="state-grid" className="mx-auto max-w-3xl px-4 pt-6">
         <div className="mb-3 flex items-end justify-between">
           <h2 className="text-lg font-black tracking-tight sm:text-xl">
-            Stages near <span className="text-[#E50914]">you</span>
+            {t('roomsNearYou')} <span className="text-[#E50914]">{t('you')}</span>
           </h2>
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search states…"
+            placeholder={t('searchStates')}
             className="h-9 w-40 border-neutral-700 bg-neutral-800/60 text-xs text-white placeholder:text-neutral-500 sm:w-56"
             aria-label="Search states"
           />
@@ -200,7 +208,7 @@ export function LandingView({
         <div className="mb-1 flex items-end justify-between">
           <h2 className="flex items-center gap-2 text-lg font-black tracking-tight sm:text-xl">
             <Trophy className="h-5 w-5 text-[#F5A623]" />
-            India&apos;s top <span className="text-[#E50914]">singers</span>
+            {t('topSingers')} <span className="text-[#E50914]">{t('singers')}</span>
           </h2>
           <Button
             size="sm"
@@ -297,9 +305,9 @@ export function LandingView({
         <h2 className="mb-4 text-lg font-black tracking-tight sm:text-xl">How it works</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {[
-            { n: '1', t: 'Pick your state', d: 'Auto-detected from your location — or tap any state to roam. No minimum members, solo works too.' },
-            { n: '2', t: 'Take the Main Seat', d: 'Grab the mic and sing with YouTube karaoke. Step down any time — the seat is first-come, first-served.' },
-            { n: '3', t: 'Get applauded 🎉', d: 'The room throws poppers (+10) and hearts (+100). Points build your spot on the leaderboard.' },
+            { n: '1', t: 'Pick your state', d: 'Auto-detected from your location — or tap any state to roam. Every state has its own hangout room, solo works too.' },
+            { n: '2', t: 'Chat, talk, vibe', d: 'Text chat is the heart of every room — turn on your mic & camera whenever you feel like talking. Everything is anonymous.' },
+            { n: '3', t: 'Sing when the mood hits 🎤', d: 'One tap starts a Sing Along in any hangout — Main Seat, YouTube karaoke, poppers & hearts for the leaderboard. Or open a dedicated Singing room that lives on stage.' },
           ].map((s) => (
             <div key={s.n} className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-4">
               <span className="text-3xl font-black text-[#E50914]">{s.n}</span>
@@ -313,7 +321,7 @@ export function LandingView({
       {/* footer */}
       <footer className="mt-auto pt-14 text-center">
         <p className="text-[11px] text-neutral-600">
-          SingAlong · Open source (MIT) · WebRTC peer-to-peer — media never touches our servers
+          DesiHangout · Open source (MIT) · WebRTC peer-to-peer — media never touches our servers
         </p>
         <p className="mt-1 text-[11px] text-neutral-700">Be kind. No abusive content. Rooms are moderated by hosts.</p>
       </footer>

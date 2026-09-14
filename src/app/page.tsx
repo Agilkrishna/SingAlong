@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Headphones, Loader2, Mic } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { useRoom, ApplauseKind } from '@/hooks/use-room'
+import { useRoom, ApplauseKind, SessionRecap } from '@/hooks/use-room'
 import {
   loadProfile,
   saveProfile,
@@ -14,16 +14,29 @@ import {
   AnonymousProfile,
 } from '@/lib/indian-states'
 import { stateFromSlug } from '@/lib/invite'
+import { AVATARS } from '@/lib/avatars'
+import {
+  bumpStreak,
+  streakLabel,
+  getBadges,
+  badgeInfo,
+  awardTimeBadges,
+  trackRoomVisit,
+} from '@/lib/badges'
+import { matchVibeFriends } from '@/lib/social'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { LandingView } from '@/components/anthakshari/landing-view'
 import { LobbyView } from '@/components/anthakshari/lobby-view'
 import { RoomView } from '@/components/anthakshari/room-view'
+import { RecapDialog } from '@/components/anthakshari/recap-dialog'
 
 type View = 'landing' | 'lobby' | 'room'
 
 interface PendingJoin {
   roomId: string
   name: string
+  locked?: boolean
 }
 
 export default function Home() {
@@ -54,7 +67,54 @@ export default function Home() {
   const [creating, setCreating] = useState(false)
   const [pendingJoin, setPendingJoin] = useState<PendingJoin | null>(null)
   const [joining, setJoining] = useState(false)
+  const [joinPasscode, setJoinPasscode] = useState('')
+  const [showPasscode, setShowPasscode] = useState(false)
+  const [recap, setRecap] = useState<SessionRecap | null>(null)
+  const [streak, setStreak] = useState(0)
   const lobbyPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const vibeToastRoomRef = useRef<string>('')
+  const { reactions, clearReaction, removed, clearRemoved } = roomApi
+  const {
+    rejoined,
+    clearRejoined,
+    latency,
+    quizStart,
+    quizAnswer,
+    promptsStart,
+    promptsNext,
+    promptsEnd,
+    antakshariStart,
+    antakshariDone,
+    antakshariEnd,
+  } = roomApi
+
+  // the host dropped us — say it out loud and return to the lobby
+  useEffect(() => {
+    if (!removed) return
+    toast({ title: 'Removed from room', description: removed })
+    roomApi.leaveRoom()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setView('lobby')
+    clearRemoved()
+  }, [removed])
+
+  // auto-rejoin after a network blip — one reassuring toast
+  useEffect(() => {
+    if (!rejoined) return
+    toast({ title: 'Back online 🔁', description: rejoined })
+    clearRejoined()
+  }, [rejoined, clearRejoined, toast])
+
+  // daily streak — counts a visit, once per load; time-of-day badges too
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setStreak(bumpStreak().count)
+    const fresh = awardTimeBadges()
+    if (fresh.length > 0) {
+      const emojis = fresh.map((s) => badgeInfo(s)?.emoji ?? '').join(' ')
+      toast({ title: `${emojis} Badge unlocked!`, description: 'See your badges in the join dialog.' })
+    }
+  }, [toast])
 
   // hydrate stored profile (client only, after mount to avoid SSR mismatch).
   // the saved stage name is auto-populated here — returning users skip typing.
@@ -94,9 +154,9 @@ export default function Home() {
 
   // step 1 — the lobby asks HOW to join (singer / listener) before touching
   // the camera; the dialog's ✕ cancels and stays in the lobby
-  const requestJoin = useCallback((roomId: string, knownName?: string) => {
+  const requestJoin = useCallback((roomId: string, knownName?: string, locked?: boolean) => {
     setPendingJoin((prev) =>
-      prev ?? { roomId, name: knownName || `Room code ${roomId}` },
+      prev ?? { roomId, name: knownName || `Room code ${roomId}`, locked },
     )
   }, [])
 
@@ -117,7 +177,7 @@ export default function Home() {
     setView('lobby')
     requestJoin(
       roomId,
-      roomId.startsWith('state:') ? `${stateName} Singers` : undefined,
+      roomId.startsWith('state:') ? `${stateName} Hangout` : undefined,
     )
     window.history.replaceState(null, '', window.location.pathname)
   }, [requestJoin])
@@ -134,16 +194,28 @@ export default function Home() {
         pid: profile.pid,
         micOn: asSinger,
         camOn: asSinger,
+        passcode:
+          showPasscode || pendingJoin.locked ? joinPasscode || undefined : undefined,
       })
       setJoining(false)
-      setPendingJoin(null)
       if (ok) {
+        setPendingJoin(null)
+        setJoinPasscode('')
+        setShowPasscode(false)
         setView('room')
       } else {
-        toast({ title: 'Could not join', description: roomApi.joinError || 'Try again' })
+        // locked rooms flip the passcode input open so the retry is one tap
+        // (read the ref — the state value can lag one render behind the await)
+        if (/locked/i.test(roomApi.getJoinError())) {
+          setShowPasscode(true)
+        } else {
+          setPendingJoin(null)
+          setShowPasscode(false)
+        }
+        toast({ title: 'Could not join', description: roomApi.getJoinError() || 'Try again' })
       }
     },
-    [pendingJoin, profile, joining, roomApi, state, toast],
+    [pendingJoin, profile, joining, roomApi, state, toast, showPasscode, joinPasscode],
   )
 
   const handleDetectLocation = useCallback(() => {
@@ -194,10 +266,16 @@ export default function Home() {
   }, [])
 
   const handleCreateRoom = useCallback(
-    async (name: string) => {
+    async (
+      name: string,
+      kind: 'hangout' | 'sing' = 'hangout',
+      tags: string[] = [],
+      passcode?: string,
+      scheduleAt?: number,
+    ) => {
       if (!profile) return
       setCreating(true)
-      const roomId = await roomApi.createRoom(name, state)
+      const roomId = await roomApi.createRoom(name, state, kind, tags, passcode, scheduleAt)
       setCreating(false)
       if (roomId) {
         requestJoin(roomId, name)
@@ -209,7 +287,9 @@ export default function Home() {
   )
 
   const handleLeave = useCallback(() => {
-    roomApi.leaveRoom()
+    // leaving hands back the session stats → recap card
+    const stats = roomApi.leaveRoom()
+    setRecap(stats)
     setView('lobby')
   }, [roomApi])
 
@@ -238,12 +318,31 @@ export default function Home() {
     [toast],
   )
 
+  // vibe-friend reunion — fires once per room when a saved friend is present
+  useEffect(() => {
+    if (view !== 'room' || !room?.id) return
+    if (vibeToastRoomRef.current === room.id) return
+    vibeToastRoomRef.current = room.id
+    const friends = matchVibeFriends(room.participants.map((p) => p.name))
+    if (friends.length > 0) {
+      toast({
+        title: '🎉 Your vibe friend is here!',
+        description: friends.map((f) => f.name).join(', '),
+      })
+    }
+    // room-visit tracking (Social Butterfly badge)
+    const fresh = trackRoomVisit(room.id)
+    if (fresh.length > 0) {
+      toast({ title: '🦋 Badge unlocked: Social Butterfly!', description: '5 rooms visited on this device.' })
+    }
+  }, [view, room, toast])
+
   /* -------------------------------- render -------------------------------- */
 
   if (!profile) {
     return (
       <main className="flex min-h-[100dvh] items-center justify-center bg-[#141414]">
-        <span className="text-3xl font-black tracking-tighter text-[#E50914]">SING ALONG</span>
+        <span className="text-3xl font-black tracking-tighter text-[#E50914]">DESI&nbsp;HANGOUT</span>
       </main>
     )
   }
@@ -271,7 +370,10 @@ export default function Home() {
           joinError={joinError}
           onBack={() => setView('landing')}
           onRefresh={() => state && roomApi.listRooms(state)}
-          onJoin={(roomId) => requestJoin(roomId, lobbyRooms.find((r) => r.id === roomId)?.name)}
+          onJoin={(roomId) => {
+            const r = lobbyRooms.find((room) => room.id === roomId)
+            requestJoin(roomId, r?.name, r?.locked)
+          }}
           onCreateRoom={handleCreateRoom}
           onJoinByCode={(code) => requestJoin(code)}
         />
@@ -289,12 +391,46 @@ export default function Home() {
           localStream={localStream}
           applause={applause}
           onClearApplause={roomApi.clearApplause}
+          reactions={reactions}
+          onClearReaction={clearReaction}
           onToggleMic={() => roomApi.toggleMic(mediaError2Toast)}
           onToggleCam={() => roomApi.toggleCam(mediaError2Toast)}
           onSendChat={roomApi.sendChat}
           onTakeSeat={handleTakeSeat}
           onLeaveSeat={roomApi.leaveSeat}
           onAward={handleAward}
+          onHostMute={(targetId, muted) =>
+            roomApi.hostMute(targetId, muted, (msg) => toast({ title: 'Host controls', description: msg }))
+          }
+          onHostRemove={(targetId) =>
+            roomApi.hostRemove(targetId, (msg) => toast({ title: 'Host controls', description: msg }))
+          }
+          latency={latency}
+          onQuizStart={() =>
+            quizStart((msg) => toast({ title: 'Quiz', description: msg }))
+          }
+          onQuizAnswer={(choice) =>
+            quizAnswer(choice, (msg) => toast({ title: 'Quiz', description: msg }))
+          }
+          onPromptsStart={(mode) =>
+            promptsStart(mode, (msg) => toast({ title: 'Party games', description: msg }))
+          }
+          onPromptsNext={() =>
+            promptsNext((msg) => toast({ title: 'Party games', description: msg }))
+          }
+          onPromptsEnd={promptsEnd}
+          onAntakshariStart={() =>
+            antakshariStart((msg) => toast({ title: 'Antakshari', description: msg }))
+          }
+          onAntakshariDone={(song) =>
+            antakshariDone(song, (msg) => toast({ title: 'Antakshari', description: msg }))
+          }
+          onAntakshariEnd={antakshariEnd}
+          onSendReaction={() => roomApi.sendReaction('heart')}
+          onReport={(reason, targetName) => {
+            roomApi.reportRoom(reason, targetName)
+            toast({ title: 'Report sent', description: 'Moderators will review this room. Thank you.' })
+          }}
           onLeave={handleLeave}
           onKaraokeLoad={roomApi.karaokeLoad}
           onKaraokePlay={roomApi.karaokePlay}
@@ -303,25 +439,115 @@ export default function Home() {
           onKaraokeEnded={roomApi.karaokeEnded}
           onKaraokeQueueAdd={roomApi.karaokeQueueAdd}
           onKaraokeQueueRemove={roomApi.karaokeQueueRemove}
+          onStartSingAlong={() =>
+            roomApi.startActivity('sing', (msg) => toast({ title: 'Sing Along', description: msg }))
+          }
+          onListenTogether={() =>
+            roomApi.startActivity('listen', (msg) => toast({ title: 'Listen Together', description: msg }))
+          }
+          onWatchParty={() =>
+            roomApi.startActivity('watch', (msg) => toast({ title: 'Watch Party', description: msg }))
+          }
+          onEndActivity={roomApi.endActivity}
         />
       )}
+
+      {/* session recap card — shown after leaving a room */}
+      <RecapDialog open={!!recap} onOpenChange={(open) => !open && setRecap(null)} recap={recap} />
 
       {/* pre-join choice — the PRIMARY action joins with mic & camera, so the
           browser permission prompt fires right as you join. Listeners who
           explicitly don't want the prompt use the quiet option below.
           The built-in ✕ (and overlay click) cancels and stays in the lobby. */}
-      <Dialog open={!!pendingJoin} onOpenChange={(open) => !open && setPendingJoin(null)}>
+      <Dialog
+        open={!!pendingJoin}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingJoin(null)
+            setShowPasscode(false)
+            setJoinPasscode('')
+          }
+        }}
+      >
         <DialogContent
-          className="max-w-sm rounded-2xl border-neutral-800 bg-[#141414] gap-4"
+          className="max-h-[90dvh] max-w-sm gap-4 overflow-y-auto rounded-2xl border-neutral-800 bg-[#141414]"
           data-testid="join-dialog"
         >
           <DialogHeader>
-            <DialogTitle className="text-lg font-black text-white">Join this stage?</DialogTitle>
+            <DialogTitle className="text-lg font-black text-white">Join this hangout?</DialogTitle>
             <DialogDescription className="text-xs text-neutral-400" data-testid="join-dialog-room">
               {pendingJoin?.name}
               {state ? ` · ${state}` : ''} — we&apos;ll ask for mic &amp; camera as you join
             </DialogDescription>
           </DialogHeader>
+
+          {/* avatar picker — anonymous but expressive */}
+          <div>
+            <p className="mb-1.5 text-[10px] font-black uppercase tracking-widest text-neutral-500">
+              Pick your avatar
+            </p>
+            <div className="flex flex-wrap gap-1.5" data-testid="avatar-picker">
+              {AVATARS.map((a, idx) => {
+                const on = (profile?.avatar ?? '') === a
+                return (
+                  <button
+                    key={a}
+                    onClick={() =>
+                      setProfile((p) => {
+                        if (!p) return p
+                        const next = { ...p, avatar: on ? '' : a }
+                        saveProfile(next)
+                        return next
+                      })
+                    }
+                    aria-pressed={on}
+                    aria-label={`Avatar ${a}`}
+                    data-testid={`avatar-${idx}`}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full text-lg transition ${
+                      on
+                        ? 'bg-[#E50914] shadow-lg shadow-[#E50914]/30'
+                        : 'bg-neutral-800 hover:bg-neutral-700'
+                    }`}
+                  >
+                    {a}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* streak + badges — your device-local achievements */}
+          <p className="text-[11px] text-neutral-400" data-testid="streak-line">
+            {streakLabel(streak)}
+            {getBadges().length > 0 && (
+              <span className="ml-2">
+                {getBadges()
+                  .map((slug) => badgeInfo(slug)?.emoji ?? '')
+                  .join(' ')}
+              </span>
+            )}
+          </p>
+
+          {/* passcode — appears for locked rooms (or after a locked error) */}
+          {(showPasscode || pendingJoin?.locked) && (
+            <div data-testid="passcode-box">
+              <Input
+                value={joinPasscode}
+                onChange={(e) => setJoinPasscode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                placeholder="Room passcode (digits)"
+                inputMode="numeric"
+                autoFocus
+                data-testid="join-passcode-input"
+                className="h-10 border-neutral-700 bg-neutral-800/80 text-center font-mono text-sm tracking-[0.4em] text-white placeholder:font-sans placeholder:tracking-normal placeholder:text-neutral-500"
+                aria-label="Room passcode"
+                onKeyDown={(e) => e.key === 'Enter' && joinPasscode && confirmJoin(true)}
+              />
+              <p className="mt-1 text-[10px] text-neutral-500">
+                🔒 This room is locked — ask the host for the code.
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2.5">
             <button
               onClick={() => confirmJoin(true)}
@@ -339,7 +565,7 @@ export default function Home() {
               </span>
               <span className="mt-1 block text-xs leading-relaxed text-neutral-400">
                 Your browser will ask for <b className="text-neutral-200">audio &amp; video</b>{' '}
-                permission — allow it once and you&apos;re ready for the Main Seat.
+                permission — allow it once and you&apos;re ready to talk &amp; sing.
               </span>
             </button>
             <button
@@ -357,7 +583,7 @@ export default function Home() {
                 Join without mic &amp; camera
               </span>
               <span className="mt-0.5 block text-[11px] leading-relaxed text-neutral-500">
-                Listener mode — watch, chat &amp; applaud. No permission prompt.
+                Listener mode — chat, watch &amp; applaud. No permission prompt.
               </span>
             </button>
           </div>

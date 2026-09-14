@@ -1,11 +1,11 @@
 #!/bin/bash
-# Rebuild download/singalong-github.zip from the project tree.
+# Rebuild download/desihangout-github.zip from the project tree.
 # Excludes match worklog Task 5 (nothing sensitive or heavy inside).
 set -euo pipefail
 
 ROOT=/home/z/my-project
-STAGE=/tmp/singalong-github-stage
-ZIP=$ROOT/download/singalong-github.zip
+STAGE=/tmp/desihangout-github-stage
+ZIP=$ROOT/download/desihangout-github.zip
 
 rm -rf "$STAGE" "$ZIP"
 mkdir -p "$STAGE"
@@ -33,6 +33,8 @@ rsync -a \
   --exclude 'upload/' \
   --exclude '*.tsbuildinfo' \
   --exclude 'agent-ctx/' \
+  --exclude 'tool-results/' \
+  --exclude 'dev.log' \
   "$ROOT/" "$STAGE/"
 
 # sanity: keep the empty db dir in git

@@ -66,7 +66,7 @@ export function VideoTile({
             className="flex h-14 w-14 items-center justify-center rounded-full text-xl font-black text-white shadow-lg sm:h-16 sm:w-16 sm:text-2xl"
             style={{ backgroundColor: participant.color }}
           >
-            {participant.name.slice(0, 2).toUpperCase()}
+            {participant.avatar ?? participant.name.slice(0, 2).toUpperCase()}
           </div>
           {(isLocal ? !camOn : !participant.camOn) && (
             <span className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-neutral-500">

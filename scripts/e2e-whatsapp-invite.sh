@@ -8,13 +8,35 @@ PASS=0; FAIL=0
 ok()   { echo "  ✅ $1"; PASS=$((PASS+1)); }
 bad()  { echo "  ❌ $1"; FAIL=$((FAIL+1)); }
 
-echo "▶ [1] start edge proxy :8099"
-pkill -f "edge-proxy.js" 2>/dev/null; sleep 0.5
+echo "▶ [1] start realtime :3003 + next :3000 + edge proxy :8099"
+pkill -9 -f "anthakshari-service" 2>/dev/null; pkill -f "edge-proxy.js" 2>/dev/null; sleep 0.5
+# worklog lesson: kill stubborn port owners by pid and VERIFY the port is free
+for PORT_NO in 3003 3000 8099; do
+  for PID in $(ss -ltnp 2>/dev/null | grep ":$PORT_NO " | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
+    kill -9 "$PID" 2>/dev/null
+  done
+done
+sleep 0.7
+if ss -ltn 2>/dev/null | grep -q ":3003 "; then echo "ABORT: :3003 still occupied"; ss -ltnp | grep 3003; exit 1; fi
+setsid nohup bun /home/z/my-project/mini-services/anthakshari-service/index.ts >/home/z/my-project/scripts/realtime.log 2>&1 &
+# standalone mode needs static assets copied next to server.js (the Dockerfile
+# does this for Render; the sandbox E2E must redo it after every next build)
+mkdir -p /home/z/my-project/.next/standalone/.next
+rm -rf /home/z/my-project/.next/standalone/.next/static
+cp -r /home/z/my-project/.next/static /home/z/my-project/.next/standalone/.next/static
+rm -rf /home/z/my-project/.next/standalone/public
+cp -r /home/z/my-project/public /home/z/my-project/.next/standalone/public
+setsid nohup bun /home/z/my-project/.next/standalone/server.js >/home/z/my-project/scripts/next-3000.log 2>&1 &
+for i in $(seq 1 30); do curl -sf -o /dev/null --max-time 2 http://127.0.0.1:3000/ && break; sleep 0.5; done
 PORT=8099 setsid nohup bun /home/z/my-project/docker/edge-proxy.js >/home/z/my-project/scripts/edge-8099.log 2>&1 &
 for i in $(seq 1 20); do
   curl -sf -o /dev/null --max-time 2 http://localhost:8099/ && break
   sleep 0.5
 done
+sleep 1
+if ! grep -q "DesiHangout realtime service running" /home/z/my-project/scripts/realtime.log 2>/dev/null || grep -qi "EADDRINUSE" /home/z/my-project/scripts/realtime.log 2>/dev/null; then
+  echo "ABORT: realtime service did not boot clean:"; tail -5 /home/z/my-project/scripts/realtime.log; exit 1
+fi
 curl -s --max-time 3 "http://localhost:8099/socket.io/?EIO=4&transport=polling&XTransformPort=3003" | head -c 40 | grep -q '0{' \
   && ok "socket.io handshake via :8099" || bad "socket.io handshake via :8099"
 
@@ -35,11 +57,11 @@ agent-browser eval "!!document.querySelector('[data-testid=\"join-dialog\"]')" 2
   && ok "join dialog auto-opened after Create" || bad "join dialog auto-opened after Create"
 agent-browser find testid join-listener click >/dev/null 2>&1
 sleep 2
-agent-browser eval "!!document.querySelector('[data-testid=\"video-grid\"]')" 2>/dev/null | grep -q true \
-  && ok "in room (video grid visible)" || bad "in room (video grid visible)"
+agent-browser eval "!!document.querySelector('[data-testid=\"hangout-area\"]')" 2>/dev/null | grep -q true \
+  && ok "in room (hangout chat-first view)" || bad "in room (hangout chat-first view)"
 
 echo "▶ [4] read room code from header"
-ROOM_CODE=$(agent-browser eval "document.querySelector('[data-testid=\"room-title\"]').nextElementSibling.textContent.match(/room code ([A-Z0-9]{5})/)?.[1]||''" 2>/dev/null | tr -d '"')
+ROOM_CODE=$(agent-browser eval "document.querySelector('[data-testid=\"room-subtitle\"]').textContent.match(/room code ([A-Z0-9]{5})/)?.[1]||''" 2>/dev/null | tr -d '"')
 [ -n "$ROOM_CODE" ] && ok "room code captured: $ROOM_CODE" || bad "room code captured (got '$ROOM_CODE')"
 if [ -z "$ROOM_CODE" ]; then echo "ABORT: no room code — proxy/service path is broken"; exit 1; fi
 
@@ -78,21 +100,21 @@ CLEAN=$(agent-browser eval "window.location.search" 2>/dev/null | tr -d '"')
 [ -z "$CLEAN" ] && ok "URL params consumed (address bar clean)" || bad "URL params consumed (still '$CLEAN')"
 agent-browser find testid join-listener click >/dev/null 2>&1
 sleep 2.5
-agent-browser eval "!!document.querySelector('[data-testid=\"video-grid\"]')" 2>/dev/null | grep -q true \
+agent-browser eval "!!document.querySelector('[data-testid=\"hangout-area\"]')" 2>/dev/null | grep -q true \
   && ok "invitee landed in the room" || bad "invitee landed in the room"
-CODE2=$(agent-browser eval "document.querySelector('[data-testid=\"room-title\"]').nextElementSibling.textContent.match(/room code ([A-Z0-9]{5})/)?.[1]||''" 2>/dev/null | tr -d '"')
+CODE2=$(agent-browser eval "document.querySelector('[data-testid=\"room-subtitle\"]').textContent.match(/room code ([A-Z0-9]{5})/)?.[1]||''" 2>/dev/null | tr -d '"')
 [ "$CODE2" = "$ROOM_CODE" ] && ok "room code matches invite ($CODE2)" || bad "room code matches invite ($CODE2 vs $ROOM_CODE)"
 
 echo "▶ [8] deep link to default state stage /?room=state:goa&s=Goa"
 agent-browser open "http://localhost:8099/?room=state%3Agoa&s=Goa" >/dev/null 2>&1
 sleep 2.5
 DNAME2=$(agent-browser eval "document.querySelector('[data-testid=\"join-dialog-room\"]')?.textContent||''" 2>/dev/null | tr -d '"')
-echo "$DNAME2" | grep -qi "Goa Singers" && ok "default-stage dialog named ('$DNAME2')" || bad "default-stage dialog named ('$DNAME2')"
+echo "$DNAME2" | grep -qi "Goa Hangout" && ok "default-room dialog named ('$DNAME2')" || bad "default-room dialog named ('$DNAME2')"
 agent-browser find testid join-listener click >/dev/null 2>&1
 sleep 2.5
-agent-browser eval "!!document.querySelector('[data-testid=\"video-grid\"]')" 2>/dev/null | grep -q true \
-  && ok "joined Goa Singers open stage" || bad "joined Goa Singers open stage"
-ST=$(agent-browser eval "document.querySelector('[data-testid=\"room-title\"]').nextElementSibling.textContent.split('·')[0].trim()" 2>/dev/null | tr -d '"')
+agent-browser eval "!!document.querySelector('[data-testid=\"hangout-area\"]')" 2>/dev/null | grep -q true \
+  && ok "joined Goa Hangout open room" || bad "joined Goa Hangout open room"
+ST=$(agent-browser eval "document.querySelector('[data-testid=\"room-subtitle\"]').textContent.split('·')[0].trim()" 2>/dev/null | tr -d '"')
 echo "$ST" | grep -qi "Goa" && ok "room state is Goa ('$ST')" || bad "room state is Goa ('$ST')"
 
 echo ""

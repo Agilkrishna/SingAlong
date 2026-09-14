@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate SingAlong red favicon assets: favicon.ico (16/32/48) + apple-icon.png (180).
+"""Generate DesiHangout red favicon assets: favicon.ico (16/32/48) + apple-icon.png (180).
 
 Draws the same red-gradient mic as src/app/icon.svg with PIL.
 """

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { Armchair, LogOut, Mic, Music4, Sparkles } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Armchair, LogOut, Mic, Music2, Music4, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ApplauseKind, Participant, StageState } from '@/hooks/use-room'
+import { Input } from '@/components/ui/input'
+import { AntakshariPublic, ApplauseKind, Participant, StageState } from '@/hooks/use-room'
 
 interface StagePanelProps {
   stage: StageState | null
@@ -13,6 +14,11 @@ interface StagePanelProps {
   onTakeSeat: (onSuccess?: () => void) => void
   onLeaveSeat: () => void
   onAward: (kind: ApplauseKind) => void
+  /** the classic Antakshari letter game — lives on the stage */
+  antakshari: AntakshariPublic | null
+  onAntakshariStart: () => void
+  onAntakshariDone: (song: string) => void
+  onAntakshariEnd: () => void
 }
 
 function StatChip({ label, value, accent }: { label: string; value: number; accent?: boolean }) {
@@ -26,11 +32,33 @@ function StatChip({ label, value, accent }: { label: string; value: number; acce
   )
 }
 
-export function StagePanel({ stage, participants, myId, onTakeSeat, onLeaveSeat, onAward }: StagePanelProps) {
+export function StagePanel({
+  stage,
+  participants,
+  myId,
+  onTakeSeat,
+  onLeaveSeat,
+  onAward,
+  antakshari,
+  onAntakshariStart,
+  onAntakshariDone,
+  onAntakshariEnd,
+}: StagePanelProps) {
   const [busy, setBusy] = useState<ApplauseKind | null>(null)
+  const [song, setSong] = useState('')
+  const [antakOpen, setAntakOpen] = useState(true)
+
+  // turn countdown ticks only while the game runs
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (!antakshari) return
+    const t = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(t)
+  }, [antakshari])
 
   const iAmOnSeat = !!stage && stage.singerId === myId
   const singer = participants.find((p) => p.id === stage?.singerId)
+  const myName = participants.find((p) => p.id === myId)?.name ?? ''
 
   const tap = (kind: ApplauseKind) => {
     setBusy(kind)
@@ -171,6 +199,137 @@ export function StagePanel({ stage, participants, myId, onTakeSeat, onLeaveSeat,
             </p>
           </div>
         )}
+        {/* ------------------------------ Antakshari ------------------------------ */}
+        <section
+          className="mt-4 rounded-xl border border-[#F5A623]/40 bg-[#F5A623]/5"
+          data-testid="antakshari-box"
+        >
+          <button
+            onClick={() => setAntakOpen((o) => !o)}
+            className="flex w-full items-center justify-between px-3.5 py-2.5 text-left"
+            data-testid="antakshari-toggle"
+            aria-expanded={antakOpen}
+          >
+            <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-widest text-[#F5A623]">
+              <Music2 className="h-3.5 w-3.5" /> 🎵 Antakshari letter game
+            </span>
+            <span className="text-[10px] font-bold text-neutral-500">{antakOpen ? 'hide' : 'open'}</span>
+          </button>
+
+          {antakOpen && (
+            <div className="flex flex-col gap-3 px-3.5 pb-3.5">
+              {!antakshari && (
+                <>
+                  <p className="text-[11px] leading-relaxed text-neutral-400">
+                    The classic: you get a letter, you sing a song starting with it, type the song name
+                    and tap Done. The next letter comes from the last letter of your song. 45s per turn!
+                  </p>
+                  <Button
+                    onClick={onAntakshariStart}
+                    data-testid="antakshari-start"
+                    className="h-10 w-full rounded-md bg-[#F5A623] text-xs font-black uppercase tracking-widest text-black hover:bg-[#ffbe3d]"
+                  >
+                    <Music2 className="mr-2 h-4 w-4" /> Start Antakshari
+                  </Button>
+                </>
+              )}
+
+              {antakshari && (
+                <>
+                  {(() => {
+                    const turnName = antakshari.players[antakshari.turnIdx] ?? '—'
+                    const isMyTurn = turnName === myName
+                    const remaining = Math.max(0, antakshari.endsAt - now)
+                    const scores = Object.entries(antakshari.scores).sort((a, b) => b[1] - a[1])
+                    return (
+                      <div className="flex flex-col gap-2.5" data-testid="antakshari-live">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-neutral-500">
+                            Turn: <b className="text-white">{isMyTurn ? 'YOU' : turnName}</b>
+                          </span>
+                          <span
+                            className={`text-xs font-black ${remaining < 10000 ? 'text-[#E50914]' : 'text-neutral-300'}`}
+                            data-testid="antakshari-timer"
+                          >
+                            ⏱ {Math.ceil(remaining / 1000)}s
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-3 rounded-lg border border-[#F5A623]/30 bg-black/40 p-3">
+                          <span
+                            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[#F5A623] text-2xl font-black text-black"
+                            data-testid="antakshari-letter"
+                          >
+                            {antakshari.letter}
+                          </span>
+                          <p className="text-[11px] leading-snug text-neutral-300">
+                            {isMyTurn
+                              ? `Sing a song starting with \u201c${antakshari.letter}\u201d — then type its name below:`
+                              : `${turnName} is singing — next letter comes from their song!`}
+                          </p>
+                        </div>
+
+                        {isMyTurn && (
+                          <div className="flex gap-2">
+                            <Input
+                              value={song}
+                              onChange={(e) => setSong(e.target.value.slice(0, 80))}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && song.trim()) {
+                                  onAntakshariDone(song.trim())
+                                  setSong('')
+                                }
+                              }}
+                              placeholder="e.g. Kal Ho Naa Ho"
+                              data-testid="antakshari-song-input"
+                              className="h-10 border-neutral-700 bg-neutral-800/80 text-xs text-white placeholder:text-neutral-500"
+                              aria-label="Song name"
+                            />
+                            <Button
+                              onClick={() => {
+                                if (!song.trim()) return
+                                onAntakshariDone(song.trim())
+                                setSong('')
+                              }}
+                              disabled={!song.trim()}
+                              data-testid="antakshari-done"
+                              className="h-10 shrink-0 rounded-md bg-[#F5A623] px-4 text-xs font-black uppercase tracking-widest text-black hover:bg-[#ffbe3d] disabled:opacity-40"
+                            >
+                              Done ✓
+                            </Button>
+                          </div>
+                        )}
+
+                        {scores.length > 0 && (
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900/60 p-2" data-testid="antakshari-scores">
+                            <p className="mb-1 text-[9px] font-black uppercase tracking-widest text-neutral-500">Scores</p>
+                            {scores.map(([name, pts], i) => (
+                              <p key={name} className="flex justify-between text-[11px] font-bold text-neutral-300">
+                                <span>
+                                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '•'} {name}
+                                </span>
+                                <span className="text-[#F5A623]">{pts}</span>
+                              </p>
+                            ))}
+                          </div>
+                        )}
+
+                        <Button
+                          onClick={onAntakshariEnd}
+                          variant="ghost"
+                          data-testid="antakshari-end"
+                          className="h-8 w-full rounded-md text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:bg-neutral-800 hover:text-white"
+                        >
+                          End game
+                        </Button>
+                      </div>
+                    )
+                  })()}
+                </>
+              )}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   )

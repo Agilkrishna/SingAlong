@@ -1,5 +1,5 @@
 #!/bin/sh
-# SingAlong — single-container boot.
+# DesiHangout — single-container boot.
 # 1. start the realtime socket.io mini-service  (internal :3003)
 # 2. start the Next.js standalone server        (internal :3000)
 # 3. expose ONE public port via the bun edge proxy (public :$PORT)

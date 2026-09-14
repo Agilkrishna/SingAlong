@@ -14,24 +14,27 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SingAlong — Anonymous Anthakshari Rooms",
+  title: "DesiHangout — India's Hangout & Sing Along Rooms",
   description:
-    "Join anonymous video & voice Anthakshari rooms based on your Indian state. No sign-up — pick a stage, sing, and chain songs live. Open source.",
+    "Anonymous hangout rooms for every Indian state — chat, voice & video with people from your state. Open a general hangout or a dedicated singing room with one-tap Sing Along (Antakshari) karaoke. No sign-up. Open source.",
   keywords: [
+    "hangout",
+    "chat rooms",
+    "India",
+    "DesiHangout",
     "Anthakshari",
-    "singing game",
+    "singing rooms",
     "anonymous rooms",
     "video chat",
     "voice chat",
-    "India",
     "open source",
   ],
-  authors: [{ name: "SingAlong" }],
+  authors: [{ name: "DesiHangout" }],
   openGraph: {
-    title: "SingAlong — Anthakshari with your entire State. Live.",
+    title: "DesiHangout — Hang out with your entire State. Live.",
     description:
-      "Anonymous video + voice singing rooms for every Indian state. Free and open source.",
-    siteName: "SingAlong",
+      "Anonymous hangout rooms for every Indian state — chat, voice & video, with one-tap Sing Along karaoke. Free and open source.",
+    siteName: "DesiHangout",
     type: "website",
   },
 };

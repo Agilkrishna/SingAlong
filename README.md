@@ -1,8 +1,9 @@
-# 🎤 SingAlong — Anonymous Antakshari Rooms
+# 🎤 DesiHangout — India's Hangout & Antakshari Rooms
 
-Sing (Antakshari-style!) with people from your entire State — anonymously.
-Join a State room, hop on the **Main Seat**, sing along to a **YouTube karaoke
-track**, and let the audience shower you with **popper 🎉 (+10)** and
+Hang out with people from your entire State — anonymously. Every Indian state
+gets its own **chat room** (text + voice + video), and when the mood hits, one
+tap starts a **Sing Along**: hop on the **Main Seat**, sing to a **YouTube
+karaoke track**, and let the room shower you with **popper 🎉 (+10)** and
 **heart ❤️ (+100)** applause. Points feed the live **India leaderboard** on the
 home page.
 
@@ -10,6 +11,12 @@ Netflix-inspired dark UI · mobile-first · fully open source (MIT).
 
 ## ✨ Features
 
+- **Hangout-first rooms** — text chat is the heart of every room; a compact
+  cam strip sits on top, and anyone can turn mic/cam on or off. No minimum
+  members — solo hangouts work too.
+- **Sing Along is an activity** — one tap on 🎤 flips the whole room into the
+  sing layout (Main Seat + karaoke); anyone can end it and everyone drops back
+  into chat together. Seats & music reset when the activity ends.
 - **Anonymous join** — no signup. Names are protected: unique per room, and
   returning visitors get their name auto-filled (stable `pid` in localStorage).
 - **State rooms** — pick your State (or share your location) and join its room
@@ -56,8 +63,8 @@ a single port). See **[DEPLOY.md](./DEPLOY.md)** — Render free tier is the
 recommended path (Blueprint included: `render.yaml`).
 
 ```bash
-docker build -t singalong .
-docker run -p 8080:10000 singalong   # → http://localhost:8080
+docker build -t desihangout .
+docker run -p 8080:10000 desihangout   # → http://localhost:8080
 ```
 
 ## ⚙️ Environment

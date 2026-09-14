@@ -1,6 +1,6 @@
-# 🚀 Deploying SingAlong for Free
+# 🚀 Deploying DesiHangout for Free
 
-SingAlong is **3 moving parts in 1 container**:
+DesiHangout is **3 moving parts in 1 container**:
 
 | Part | What it does | Internal port |
 |------|--------------|---------------|
@@ -50,7 +50,7 @@ Koyeb joined Mistral AI to build AI infrastructure; the dashboard no longer offe
 
 ## ☁️ Option C2 — Google Cloud Run (free tier, card required)
 
-1. `gcloud run deploy singalong --source . --allow-unauthenticated` (it builds the Dockerfile).
+1. `gcloud run deploy desihangout --source . --allow-unauthenticated` (it builds the Dockerfile).
 2. Set port to **10000** (`--port 10000`), min-instances 0.
 3. **No splash page and ~10 s cold start**, plus 2 M requests/month free — but open **WebSockets bill vCPU-seconds continuously**, so a multi-hour room can exhaust the 180 k free vCPU-s faster than the others. Best for light/sporadic jam sessions.
 
@@ -68,15 +68,15 @@ Oracle's Always Free ARM VM (4 cores / 24 GB RAM) is the most powerful truly-fre
 
 ```bash
 sudo apt install docker.io caddy
-git clone <your-repo> && cd singalong
-sudo docker build -t singalong .
-sudo docker run -d --name singalong --restart unless-stopped \
-  -p 127.0.0.1:3001:10000 -v /opt/singalong/db:/app/db singalong
+git clone <your-repo> && cd desihangout
+sudo docker build -t desihangout .
+sudo docker run -d --name desihangout --restart unless-stopped \
+  -p 127.0.0.1:3001:10000 -v /opt/desihangout/db:/app/db desihangout
 # host Caddy (or the included config pattern) terminates HTTPS on 80/443:
-#   singalong.yourdomain.com → reverse_proxy 127.0.0.1:3001
+#   desihangout.yourdomain.com → reverse_proxy 127.0.0.1:3001
 ```
 
-Because the SQLite file lives in `/opt/singalong/db` on the VM, **nothing ever resets**.
+Because the SQLite file lives in `/opt/desihangout/db` on the VM, **nothing ever resets**.
 
 ---
 

@@ -18,10 +18,16 @@ export interface Participant {
   pid?: string
   name: string
   color: string
+  /** optional emoji avatar picked at join */
+  avatar?: string
   micOn: boolean
   camOn: boolean
   isHost: boolean
   joinedAt: number
+  /** host-enforced mute (server keeps rejecting their mic-on) */
+  forcedMuted?: boolean
+  /** socket dropped — the service holds their seat for a grace window */
+  disconnected?: boolean
 }
 
 export interface ChatMessage {
@@ -30,6 +36,7 @@ export interface ChatMessage {
   from?: string
   name?: string
   color?: string
+  avatar?: string
   text: string
   at: number
 }
@@ -77,11 +84,73 @@ export interface KaraokeState {
   serverNow?: number
 }
 
+export type ActivityKind = 'sing' | 'listen' | 'watch'
+
+/** live trivia quiz — sanitized server view (answer hidden mid-question) */
+export interface QuizPublic {
+  phase: 'question' | 'reveal'
+  index: number
+  total: number
+  q: string
+  options: string[]
+  endsAt: number
+  answersCount: number
+  scores: Record<string, number>
+  byName: string
+  correct?: number
+  gotIt?: string[]
+}
+
+/** Truth-or-Dare / Rapid-fire prompt card */
+export interface PromptsPublic {
+  mode: 'truth' | 'dare' | 'rapid'
+  text: string
+  target: string
+  byName: string
+  at: number
+}
+
+/** classic Antakshari letter game (Sing Along activity) */
+export interface AntakshariPublic {
+  players: string[]
+  turnIdx: number
+  letter: string
+  scores: Record<string, number>
+  endsAt: number
+  byName: string
+}
+
+/** floating-heart reaction (pure fun — no points, every activity) */
+export interface ReactionEvent {
+  id: string
+  kind: 'heart'
+  by: string
+  byName: string
+  at: number
+}
+
 export interface RoomSnapshot {
   id: string
   name: string
   state: string
   hostId: string
+  /** what this room IS — 'hangout' (chat-first, default) or 'sing'
+   *  (dedicated singing room). Optional so stale snapshots stay harmless. */
+  kind?: 'hangout' | 'sing'
+  /** 'chat' = plain hangout (default) · 'sing' = Sing Along activity ·
+   *  'listen' = Listen Together · 'watch' = Watch Party.
+   *  Optional so stale snapshots (old service mid-deploy) stay harmless. */
+  activity?: 'chat' | 'sing' | 'listen' | 'watch'
+  /** vibe tags chosen at creation ('chai-time', 'retro', …) */
+  tags?: string[]
+  /** today's icebreaker prompt — deterministic per room + day */
+  prompt?: string
+  /** live party games (optional → stale snapshots harmless) */
+  quiz?: QuizPublic | null
+  prompts?: PromptsPublic | null
+  antakshari?: AntakshariPublic | null
+  /** epoch ms — "Starting soon" scheduled rooms */
+  scheduleAt?: number
   participants: Participant[]
   stage: StageState | null
   chat: ChatMessage[]
@@ -95,18 +164,38 @@ export interface LobbyRoom {
   count: number
   live: boolean
   isDefault: boolean
+  /** 'hangout' (default when absent) · 'sing' = dedicated singing room */
+  kind?: 'hangout' | 'sing'
+  /** vibe tags ('chai-time', 'retro', …) */
+  tags?: string[]
+  /** passcode-locked private room */
+  locked?: boolean
+  /** epoch ms — "Starting soon" scheduled rooms */
+  scheduleAt?: number
 }
 
 export interface JoinOptions {
   roomId: string
   state: string
-  profile: { name: string; color: string }
+  profile: { name: string; color: string; avatar?: string }
   pid: string
   micOn: boolean
   camOn: boolean
+  /** required when the room is passcode-locked */
+  passcode?: string
 }
 
 export type MediaError = { kind: 'denied' | 'unavailable' | 'none'; message: string }
+
+/** what leaveRoom hands back for the session recap card */
+export interface SessionRecap {
+  roomName: string
+  durationMs: number
+  messages: number
+  hearts: number
+  awards: number
+  songs: number
+}
 
 const CHAT_HISTORY = 60
 
@@ -156,6 +245,7 @@ export function useRoom() {
   const [lobbyRooms, setLobbyRooms] = useState<LobbyRoom[]>([])
   const [inRoom, setInRoom] = useState(false)
   const [joinError, setJoinError] = useState<string>('')
+  const joinErrorRef = useRef<string>('')
   const [mediaError, setMediaError] = useState<MediaError | null>(null)
   const [micOn, setMicOn] = useState(true)
   const [camOn, setCamOn] = useState(true)
@@ -163,6 +253,20 @@ export function useRoom() {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [hasVideoTrack, setHasVideoTrack] = useState(false)
   const [applause, setApplause] = useState<ApplauseEvent[]>([])
+  const [reactions, setReactions] = useState<ReactionEvent[]>([])
+  const [removed, setRemoved] = useState<string>('')
+  /** socket round-trip in ms (null until the first probe lands) */
+  const [latency, setLatency] = useState<number | null>(null)
+  /** "Back online — you're still in the room" — one-shot after auto-rejoin */
+  const [rejoined, setRejoined] = useState<string>('')
+
+  // auto-rejoin machinery: the last join payload lets a reconnecting socket
+  // silently resume the same seat (the service matches on pid)
+  const lastJoinRef = useRef<JoinOptions | null>(null)
+  const inRoomRef = useRef(false)
+  const everConnectedRef = useRef(false)
+  // session recap counters (this device, this visit)
+  const sessionRef = useRef({ startedAt: 0, roomName: '', messages: 0, hearts: 0, awards: 0, songs: 0 })
 
   /* ------------------------- local media bootstrap ------------------------ */
 
@@ -322,12 +426,27 @@ export function useRoom() {
       s.on('connect', () => {
         setConnected(true)
         setMyId(s.id ?? '')
+        // network blip recovered mid-room → silently resume the same seat.
+        // The service matches on pid, so the name/seat/host status follow us.
+        if (everConnectedRef.current && inRoomRef.current && lastJoinRef.current) {
+          s.emit('join-room', lastJoinRef.current, (res: { ok: boolean; error?: string }) => {
+            if (res?.ok) {
+              setRejoined('Back online — you are still in the room! 🔁')
+            } else {
+              inRoomRef.current = false
+              setInRoom(false)
+            }
+          })
+        }
+        everConnectedRef.current = true
       })
       s.on('disconnect', () => setConnected(false))
 
       s.on('room-state', (data: { room: RoomSnapshot }) => {
         // dedupe guards against any legacy/mid-deploy server still double-writing chat
         setRoom(data.room ? { ...data.room, chat: dedupeChat(data.room.chat) } : data.room)
+        // remember the room name for the session recap card
+        if (data.room && sessionRef.current.startedAt) sessionRef.current.roomName = data.room.name
         // mesh: initiate offers to peers who joined after me
         const myJoin = data.room.participants.find((p) => p.id === s.id)?.joinedAt ?? Infinity
         data.room.participants.forEach((p) => {
@@ -428,10 +547,40 @@ export function useRoom() {
         if (!data?.karaoke) return
         setRoom((prev) => (prev ? { ...prev, karaoke: data.karaoke } : prev))
       })
+
+      // host-enforced mute — self-mute immediately so it is audible too
+      s.on('force-mute', (data: { muted: boolean }) => {
+        if (data?.muted) {
+          localStreamRef.current?.getAudioTracks().forEach((t) => (t.enabled = false))
+          setMicOn(false)
+        }
+      })
+
+      // the host dropped us — page.tsx shows the message and returns to lobby
+      s.on('removed-from-room', (data: { message?: string }) => {
+        setRemoved(data?.message || 'The host removed you from the room.')
+      })
+
+      // floating hearts from anyone in the room
+      s.on('room-reaction', (data: ReactionEvent) => {
+        if (!data?.id) return
+        setReactions((prev) => [...prev.slice(-14), data])
+      })
     })()
+
+    // network-quality probe — one ack round-trip every 6s while connected
+    const latencyTimer = setInterval(() => {
+      const sock = socketRef.current
+      if (!sock?.connected) return
+      const t0 = Date.now()
+      sock.emit('latency-ping', () => {
+        setLatency(Date.now() - t0)
+      })
+    }, 6000)
 
     return () => {
       disposed = true
+      clearInterval(latencyTimer)
       Promise.resolve(socket).then((s) => s.disconnect())
       pcsRef.current.forEach((pc) => pc.close())
       pcsRef.current.clear()
@@ -449,11 +598,22 @@ export function useRoom() {
   }, [])
 
   const createRoom = useCallback(
-    (name: string, state: string): Promise<string | null> => {
+    (
+      name: string,
+      state: string,
+      kind: 'hangout' | 'sing' = 'hangout',
+      tags: string[] = [],
+      passcode?: string,
+      scheduleAt?: number,
+    ): Promise<string | null> => {
       return new Promise((resolve) => {
-        socketRef.current?.emit('create-room', { name, state }, (res: { ok: boolean; roomId?: string; error?: string }) => {
-          resolve(res?.ok ? res.roomId ?? null : null)
-        })
+        socketRef.current?.emit(
+          'create-room',
+          { name, state, kind, tags, passcode, scheduleAt },
+          (res: { ok: boolean; roomId?: string; error?: string }) => {
+            resolve(res?.ok ? res.roomId ?? null : null)
+          },
+        )
       })
     },
     [],
@@ -462,6 +622,7 @@ export function useRoom() {
   const joinRoom = useCallback(
     async (opts: JoinOptions) => {
       setJoinError('')
+      joinErrorRef.current = ''
       // listener mode (no mic, no cam) skips the permission prompt entirely —
       // the browser never asks for camera/microphone on join
       const wantMedia = opts.micOn || opts.camOn
@@ -484,12 +645,26 @@ export function useRoom() {
           pid: opts.pid,
           micOn: gotMedia && opts.micOn,
           camOn: gotMedia && opts.camOn && (localStreamRef.current?.getVideoTracks().length ?? 0) > 0,
+          passcode: opts.passcode,
         }
+        // remembered so a mid-room reconnect can silently resume this seat
+        lastJoinRef.current = payload
         socket.emit('join-room', payload, (res: { ok: boolean; error?: string }) => {
           if (res?.ok) {
+            inRoomRef.current = true
             setInRoom(true)
+            // fresh session for the recap card
+            sessionRef.current = {
+              startedAt: Date.now(),
+              roomName: '',
+              messages: 0,
+              hearts: 0,
+              awards: 0,
+              songs: 0,
+            }
             resolve(true)
           } else {
+            joinErrorRef.current = res?.error ?? 'Could not join room'
             setJoinError(res?.error ?? 'Could not join room')
             resolve(false)
           }
@@ -499,14 +674,30 @@ export function useRoom() {
     [acquireLocalMedia],
   )
 
-  const leaveRoom = useCallback(() => {
+  const leaveRoom = useCallback((): SessionRecap | null => {
     socketRef.current?.emit('leave-room')
+    inRoomRef.current = false
+    lastJoinRef.current = null
     setInRoom(false)
     setRoom(null)
     setRemoteStreams({})
     pcsRef.current.forEach((pc) => pc.close())
     pcsRef.current.clear()
     pendingIceRef.current.clear()
+    // hand back the session stats for the recap card, then reset
+    const s = sessionRef.current
+    const recap: SessionRecap | null = s.startedAt
+      ? {
+          roomName: s.roomName || 'the hangout',
+          durationMs: Date.now() - s.startedAt,
+          messages: s.messages,
+          hearts: s.hearts,
+          awards: s.awards,
+          songs: s.songs,
+        }
+      : null
+    sessionRef.current = { startedAt: 0, roomName: '', messages: 0, hearts: 0, awards: 0, songs: 0 }
+    return recap
   }, [])
 
   /* ---------------------- listener → singer upgrade ----------------------- */
@@ -576,8 +767,35 @@ export function useRoom() {
   )
 
   const sendChat = useCallback((text: string) => {
-    if (text.trim()) socketRef.current?.emit('chat', { text: text.trim() })
+    if (text.trim()) {
+      socketRef.current?.emit('chat', { text: text.trim() })
+      sessionRef.current.messages += 1
+    }
   }, [])
+
+  /* ----------------- room activities: sing · listen · watch ---------------- */
+
+  // Anyone can start a shared activity — the whole room flips layouts together
+  // until someone ends it and everyone drops back into chat.
+  const startActivity = useCallback(
+    (kind: ActivityKind, onError?: (msg: string) => void) => {
+      socketRef.current?.emit('activity-start', { kind }, (res: { ok: boolean; error?: string }) => {
+        if (res && !res.ok && res.error) onError?.(res.error)
+      })
+    },
+    [],
+  )
+
+  const endActivity = useCallback(() => {
+    socketRef.current?.emit('activity-end')
+  }, [])
+
+  /** @deprecated alias kept for readability — use startActivity('sing') */
+  const startSingAlong = useCallback(
+    (onError?: (msg: string) => void) => startActivity('sing', onError),
+    [startActivity],
+  )
+  const endSingAlong = endActivity
 
   /* ---------------------------- the Main Seat ------------------------------ */
 
@@ -612,6 +830,7 @@ export function useRoom() {
   const award = useCallback((kind: ApplauseKind, onError?: (msg: string) => void) => {
     socketRef.current?.emit('stage-award', { kind }, (res: { ok: boolean; error?: string }) => {
       if (res && !res.ok && res.error) onError?.(res.error)
+      else if (res?.ok) sessionRef.current.awards += 1
     })
   }, [])
 
@@ -623,6 +842,7 @@ export function useRoom() {
 
   const karaokeLoad = useCallback((videoId: string, title: string) => {
     socketRef.current?.emit('karaoke-load', { videoId, title })
+    sessionRef.current.songs += 1
   }, [])
 
   const karaokePlay = useCallback((position: number) => {
@@ -643,10 +863,109 @@ export function useRoom() {
 
   const karaokeQueueAdd = useCallback((videoId: string, title: string) => {
     socketRef.current?.emit('karaoke-queue-add', { videoId, title })
+    sessionRef.current.songs += 1
   }, [])
 
   const karaokeQueueRemove = useCallback((index: number) => {
     socketRef.current?.emit('karaoke-queue-remove', { index })
+  }, [])
+
+  /* --------------------------- people & safety ----------------------------- */
+
+  const hostMute = useCallback(
+    (targetId: string, muted: boolean, onError?: (msg: string) => void) => {
+      socketRef.current?.emit(
+        'host-mute',
+        { targetId, muted },
+        (res: { ok: boolean; error?: string }) => {
+          if (res && !res.ok && res.error) onError?.(res.error)
+        },
+      )
+    },
+    [],
+  )
+
+  const hostRemove = useCallback(
+    (targetId: string, onError?: (msg: string) => void) => {
+      socketRef.current?.emit('host-remove', { targetId }, (res: { ok: boolean; error?: string }) => {
+        if (res && !res.ok && res.error) onError?.(res.error)
+      })
+    },
+    [],
+  )
+
+  const sendReaction = useCallback((kind: 'heart' = 'heart') => {
+    socketRef.current?.emit('room-reaction', { kind })
+    sessionRef.current.hearts += 1
+  }, [])
+
+  const reportRoom = useCallback(
+    (reason: string, targetName?: string, onDone?: () => void) => {
+      socketRef.current?.emit(
+        'room-report',
+        { reason, targetName },
+        (res: { ok: boolean; error?: string }) => {
+          if (res?.ok) onDone?.()
+        },
+      )
+    },
+    [],
+  )
+
+  const clearReaction = useCallback((id: string) => {
+    setReactions((prev) => prev.filter((r) => r.id !== id))
+  }, [])
+
+  const clearRemoved = useCallback(() => setRemoved(''), [])
+  const clearRejoined = useCallback(() => setRejoined(''), [])
+
+  /* ------------------------------ party games ------------------------------ */
+
+  const quizStart = useCallback((onError?: (msg: string) => void) => {
+    socketRef.current?.emit('quiz-start', (res: { ok: boolean; error?: string }) => {
+      if (res && !res.ok && res.error) onError?.(res.error)
+    })
+  }, [])
+
+  const quizAnswer = useCallback((choice: number, onError?: (msg: string) => void) => {
+    socketRef.current?.emit('quiz-answer', { choice }, (res: { ok: boolean; error?: string }) => {
+      if (res && !res.ok && res.error) onError?.(res.error)
+    })
+  }, [])
+
+  const promptsStart = useCallback(
+    (mode: 'truth' | 'dare' | 'rapid', onError?: (msg: string) => void) => {
+      socketRef.current?.emit('prompts-start', { mode }, (res: { ok: boolean; error?: string }) => {
+        if (res && !res.ok && res.error) onError?.(res.error)
+      })
+    },
+    [],
+  )
+
+  const promptsNext = useCallback((onError?: (msg: string) => void) => {
+    socketRef.current?.emit('prompts-next', (res: { ok: boolean; error?: string }) => {
+      if (res && !res.ok && res.error) onError?.(res.error)
+    })
+  }, [])
+
+  const promptsEnd = useCallback(() => {
+    socketRef.current?.emit('prompts-end')
+  }, [])
+
+  const antakshariStart = useCallback((onError?: (msg: string) => void) => {
+    socketRef.current?.emit('antakshari-start', (res: { ok: boolean; error?: string }) => {
+      if (res && !res.ok && res.error) onError?.(res.error)
+    })
+  }, [])
+
+  const antakshariDone = useCallback((song: string, onError?: (msg: string) => void) => {
+    socketRef.current?.emit('antakshari-done', { song }, (res: { ok: boolean; error?: string }) => {
+      if (res && !res.ok && res.error) onError?.(res.error)
+    })
+  }, [])
+
+  const antakshariEnd = useCallback(() => {
+    socketRef.current?.emit('antakshari-end')
   }, [])
 
   return {
@@ -664,6 +983,21 @@ export function useRoom() {
     hasVideoTrack,
     applause,
     clearApplause,
+    reactions,
+    clearReaction,
+    removed,
+    clearRemoved,
+    latency,
+    rejoined,
+    clearRejoined,
+    quizStart,
+    quizAnswer,
+    promptsStart,
+    promptsNext,
+    promptsEnd,
+    antakshariStart,
+    antakshariDone,
+    antakshariEnd,
     hasLocalStream: !!localStreamRef.current,
     localStreamRef,
     listRooms,
@@ -673,9 +1007,17 @@ export function useRoom() {
     toggleMic,
     toggleCam,
     sendChat,
+    startActivity,
+    startSingAlong,
+    endSingAlong,
+    endActivity,
     takeSeat,
     leaveSeat,
     award,
+    hostMute,
+    hostRemove,
+    sendReaction,
+    reportRoom,
     karaokeLoad,
     karaokePlay,
     karaokePause,
@@ -684,5 +1026,7 @@ export function useRoom() {
     karaokeQueueAdd,
     karaokeQueueRemove,
     clearJoinError: () => setJoinError(''),
+    /** synchronous read of the last join failure (state can lag one render) */
+    getJoinError: () => joinErrorRef.current,
   }
 }

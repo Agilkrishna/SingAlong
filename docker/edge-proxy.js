@@ -1,4 +1,4 @@
-// SingAlong — single-port edge router (Bun-native; replaces Caddy inside the image).
+// DesiHangout — single-port edge router (Bun-native; replaces Caddy inside the image).
 //
 //   public :$PORT ──┬─ /socket.io/*  OR  ?XTransformPort=3003  →  realtime 127.0.0.1:3003
 //                   └─ everything else                          →  next    127.0.0.1:3000

@@ -1,6 +1,6 @@
 /**
  * WhatsApp invite helpers — one tap opens WhatsApp with a pre-filled
- * "Join my Antakshari room" message that deep-links straight into the room.
+ * "Join our hangout" message that deep-links straight into the room.
  *
  * Deep-link format:  {origin}/?room=<roomId>&s=<State Name>
  *  - custom rooms:  roomId is the 5-char code (e.g. 7K2MX)
@@ -39,9 +39,9 @@ export interface InviteInfo {
 export function buildInviteMessage(info: InviteInfo): string {
   const url = buildInviteUrl(info.roomId, info.stateName)
   const lines = [
-    '🎤 You\'re invited to an Antakshari night on SingAlong!',
+    '🎉 You\'re invited to a hangout on DesiHangout!',
     '',
-    `🎵 ${info.roomName} · ${info.stateName}`,
+    `💬 ${info.roomName} · ${info.stateName} — chat, jam & Sing Along together`,
   ]
   if (!isDefaultRoomId(info.roomId)) {
     lines.push(`🔑 Room code: ${roomDisplayCode(info.roomId)}`)

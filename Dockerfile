@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ===========================================================================
-# SingAlong — all-in-one image
+# DesiHangout — all-in-one image
 #   Bun edge proxy (public $PORT) → Next.js standalone (:3000)
 #                                 → realtime socket.io service (:3003)
 # Works on Render / Fly.io / Hugging Face Spaces / any Docker host.
